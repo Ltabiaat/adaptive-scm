@@ -1,0 +1,15 @@
+# ARIMA forecaster configuration (PRD Feature 2 / §5)
+
+forecaster:
+  name: arima
+  seasonal: true
+  seasonal_period: 7
+  information_criterion: aic
+  # pmdarima auto_arima search bounds — keep modest to control search time
+  max_p: 5
+  max_q: 5
+  max_d: 2
+  max_P: 2
+  max_Q: 2
+  max_D: 1
+  stepwise: true

@@ -1,0 +1,59 @@
+# Default configuration for the adaptive-scm experiment system.
+# Override any field with Hydra CLI syntax, e.g.:
+#   python scripts/run_experiment.py simulation.lead_time.base=5
+#
+# Per PRD §5. Do not change schema without updating dataclass validators
+# (added in Phase 1).
+
+defaults:
+  - _self_
+  - forecasters: arima       # which forecaster config to merge
+  - policies: eoq            # which policy config to merge
+  - experiments: baseline    # which experimental condition
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  product_store:
+    item_id: FOODS_3_090
+    store_id: CA_1
+  splits:
+    train_days: 1597
+    val_days: 28
+    test_days: 28
+
+simulation:
+  costs:
+    holding_per_unit_per_day: 0.05
+    stockout_per_unit: 2.00
+    fixed_order: 10.00
+    purchase_per_unit: 1.00
+  lead_time:
+    base: 3
+    stochastic_max_additional: 2
+  episode:
+    length: 28              # test horizon
+    training_length: 365    # PPO training episodes
+  noise:
+    distribution: lognormal
+
+experiments:
+  conditions:
+    - baseline
+    - demand_spike
+    - lead_time_disruption
+  disruption_window:
+    start_day: 7
+    duration_days: 14
+  demand_spike_multiplier: 1.5
+  lead_time_disruption_multiplier: 2.0
+  replications: 30
+  # Explicit seeds for reproducibility — extend or shorten as needed.
+  # Length must be >= replications; runner picks seeds[0:replications].
+  random_seeds: [42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+                 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+                 62, 63, 64, 65, 66, 67, 68, 69, 70, 71]
+
+logging:
+  level: INFO
+  json: false

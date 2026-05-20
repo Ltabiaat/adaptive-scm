@@ -1,0 +1,7 @@
+# Order-up-to (dynamic base-stock) policy configuration (PRD Feature 6 / §5)
+
+policy:
+  name: order_up_to
+  review_period: 1
+  service_level: 0.95
+  z_score: 1.645

@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# uv lockfile is committed; only ignore caches
+.uv/
+
+# ---------------------------------------------------------------------------
+# Testing & coverage
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.cache
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Notebooks
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ---------------------------------------------------------------------------
+# Project-specific (large / generated)
+# ---------------------------------------------------------------------------
+# Raw M5 data — too large for git, download separately
+data/raw/*
+!data/raw/.gitkeep
+
+# Processed parquet files — regeneratable from raw
+data/processed/*
+!data/processed/.gitkeep
+
+# Experiment outputs — regeneratable
+results/forecasts/*
+!results/forecasts/.gitkeep
+results/simulations/*
+!results/simulations/.gitkeep
+results/analysis/*
+!results/analysis/.gitkeep
+
+# Model checkpoints
+*.zip
+*.pt
+*.pth
+*.pkl
+*.joblib
+
+# Logs
+logs/
+*.log
+
+# ---------------------------------------------------------------------------
+# IDE & OS
+# ---------------------------------------------------------------------------
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,9 @@
+# Demand spike experimental condition (PRD Feature 8).
+
+experiment:
+  name: demand_spike
+  apply_demand_spike: true
+  apply_lead_time_disruption: false
+  spike_multiplier: 1.5
+  window_start_day: 7
+  window_duration_days: 14

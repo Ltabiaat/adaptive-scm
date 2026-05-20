@@ -1,0 +1,9 @@
+# Lead-time disruption experimental condition (PRD Feature 8).
+
+experiment:
+  name: lead_time_disruption
+  apply_demand_spike: false
+  apply_lead_time_disruption: true
+  lead_time_multiplier: 2.0
+  window_start_day: 7
+  window_duration_days: 14

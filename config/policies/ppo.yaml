@@ -1,0 +1,19 @@
+# PPO policy configuration (PRD Feature 9 / §5)
+
+policy:
+  name: ppo
+  total_timesteps: 500000
+  clip_range: 0.2
+  gamma: 0.99
+  gae_lambda: 0.95
+  learning_rate: 0.0003
+  batch_size: 64
+  n_epochs: 4
+  n_steps: 2048
+  policy_net: [64, 64]
+  activation: tanh
+  # Forecast horizon visible to PPO in the state vector (sliced from the
+  # 28-day forecast produced by the upstream forecaster — see PRD §8).
+  forecast_window: 7
+  # Reward normalization via Stable Baselines3 VecNormalize
+  normalize_reward: true

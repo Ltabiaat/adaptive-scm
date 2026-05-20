@@ -1,0 +1,6 @@
+# Baseline experimental condition — no disruption.
+
+experiment:
+  name: baseline
+  apply_demand_spike: false
+  apply_lead_time_disruption: false
