@@ -1,9 +1,9 @@
-"""Abstract base class and output container for forecasting models.
+"""Abstract forecaster interface and shared ``ForecastOutput`` dataclass.
 
-Defines the `Forecaster` interface that ARIMA, XGBoost, and TFT all
-implement, plus the `ForecastOutput` dataclass returned by `predict`.
-This module is imported by every concrete forecaster and by the
-simulation environment (for forecast features in PPO state).
+Defines the contract every concrete forecaster (ARIMA, XGBoost, TFT) must
+satisfy: ``fit``, ``predict``, ``save``, ``load``. Policies (EOQ, OrderUpTo, PPO)
+consume ``ForecastOutput`` instances, never concrete forecaster types, so the
+forecasting and policy layers stay decoupled.
 """
 
 from __future__ import annotations
@@ -16,23 +16,40 @@ import numpy as np
 import pandas as pd
 
 
+def rmse(predicted: np.ndarray, actual: np.ndarray) -> float:
+    """Root-mean-square error between two equal-length arrays.
+
+    Shared by all forecasters to compute validation RMSE consistently. Both
+    inputs are cast to float; no NaN handling is performed (callers pass clean
+    arrays).
+
+    Args:
+        predicted: Forecast values.
+        actual: Ground-truth values, same shape as ``predicted``.
+
+    Returns:
+        RMSE as a non-negative float.
+    """
+    predicted = np.asarray(predicted, dtype=float)
+    actual = np.asarray(actual, dtype=float)
+    return float(np.sqrt(np.mean((predicted - actual) ** 2)))
+
+
 @dataclass(frozen=True)
 class ForecastOutput:
-    """Container for forecaster output over a fixed horizon.
+    """Container for a single multi-step forecast.
 
-    Carries both point predictions and uncertainty bounds in a uniform
-    shape so downstream policies (order-up-to, PPO) can consume any
-    forecaster's output identically.
+    Holds the point forecast plus optional lower and upper quantile bounds and
+    the historical RMSE of the source model. Produced by ``Forecaster.predict``
+    and consumed by every policy and by the simulation environment (to
+    calibrate demand noise). Frozen so it can be hashed and safely passed
+    between processes.
 
     Attributes:
-        point_forecast: Point predictions, shape (horizon,). For TFT this
-            is the P50 quantile; for ARIMA/XGBoost this is the mean prediction.
-        lower_bound: Lower uncertainty bound, shape (horizon,) or None. P10
-            for TFT; mean - 1.96 * sigma for ARIMA/XGBoost.
-        upper_bound: Upper uncertainty bound, shape (horizon,) or None. P90
-            for TFT; mean + 1.96 * sigma for ARIMA/XGBoost.
-        historical_rmse: RMSE on the validation split. Used by the simulation
-            to calibrate lognormal demand noise (see PRD Feature 7).
+        point_forecast: Mean (ARIMA/XGBoost) or P50 (TFT) forecast of shape ``(horizon,)``.
+        lower_bound: P10 (TFT) or ``mean - 1.96 * sigma`` (ARIMA/XGBoost). Optional.
+        upper_bound: P90 (TFT) or ``mean + 1.96 * sigma`` (ARIMA/XGBoost). Optional.
+        historical_rmse: Validation RMSE; used by the simulator for lognormal demand noise.
     """
 
     point_forecast: np.ndarray
@@ -41,86 +58,85 @@ class ForecastOutput:
     historical_rmse: float
 
     def __post_init__(self) -> None:
-        """Validate array shapes are consistent across point and bounds.
+        """Validate shape and dtype invariants.
 
-        Performs a simple shape check to catch wiring mistakes early.
-        Called automatically by the dataclass after __init__.
+        Verifies ``point_forecast`` is 1-D, ``historical_rmse`` is non-negative,
+        and that bounds (when present) match the point forecast's shape. Raised
+        errors surface contract violations from forecaster implementations as
+        soon as a forecast is produced rather than later in the simulator.
         """
-        horizon = self.point_forecast.shape[0]
-        if self.lower_bound is not None and self.lower_bound.shape[0] != horizon:
-            raise ValueError(
-                f"lower_bound shape {self.lower_bound.shape} does not match "
-                f"point_forecast horizon {horizon}"
-            )
-        if self.upper_bound is not None and self.upper_bound.shape[0] != horizon:
-            raise ValueError(
-                f"upper_bound shape {self.upper_bound.shape} does not match "
-                f"point_forecast horizon {horizon}"
-            )
+        if self.point_forecast.ndim != 1:
+            raise ValueError(f"point_forecast must be 1-D, got shape {self.point_forecast.shape}")
         if self.historical_rmse < 0:
             raise ValueError(f"historical_rmse must be non-negative, got {self.historical_rmse}")
+        for name, bound in (("lower_bound", self.lower_bound), ("upper_bound", self.upper_bound)):
+            if bound is None:
+                continue
+            if bound.shape != self.point_forecast.shape:
+                raise ValueError(
+                    f"{name} shape {bound.shape} does not match "
+                    f"point_forecast shape {self.point_forecast.shape}"
+                )
+
+    @property
+    def horizon(self) -> int:
+        """Number of forecasted steps.
+
+        Returns:
+            Length of ``point_forecast``.
+        """
+        return int(self.point_forecast.shape[0])
 
 
 class Forecaster(ABC):
-    """Abstract interface for all demand forecasting models.
+    """Abstract base class for all forecasters.
 
-    Every concrete forecaster (ARIMA, XGBoost, TFT) implements this four-method
-    contract. The simulation runner and experiment scripts depend only on this
-    interface, never on concrete classes, which is what makes forecasters
-    interchangeable in the experiment grid.
+    Defines the four-method contract (``fit``, ``predict``, ``save``, ``load``)
+    that ARIMA, XGBoost, and TFT implementations must satisfy. Concrete classes
+    are interchangeable from the perspective of policies, the simulator, and
+    the experiment runner.
     """
 
     @abstractmethod
     def fit(self, train_data: pd.DataFrame) -> None:
-        """Train the model on historical sales data.
+        """Train the model on historical data.
 
-        Called once per (forecaster, product-store) combination during the
-        offline training phase before any simulation runs.
+        Implementations are free to use whichever columns from ``train_data``
+        they need (e.g. ARIMA uses only ``sales``; XGBoost uses the full feature
+        set). The forecaster is expected to retain enough internal state after
+        ``fit`` to produce forecasts via ``predict`` without further input.
 
         Args:
-            train_data: Time-ordered DataFrame containing at minimum a `sales`
-                column and a `date` index/column. Additional columns (engineered
-                features) are used by ML/DL forecasters and ignored by ARIMA.
+            train_data: DataFrame with at minimum a ``date`` index and a ``sales`` column.
         """
 
     @abstractmethod
     def predict(self, horizon: int) -> ForecastOutput:
-        """Produce a forecast for the next `horizon` days.
-
-        For ARIMA and TFT this is a single-shot prediction; for XGBoost it is
-        recursive (predict t, feed back as lag for t+1, etc.).
+        """Produce a ``horizon``-day forecast starting from the end of training.
 
         Args:
-            horizon: Number of days to forecast (typically 28 per PRD).
+            horizon: Number of forecast steps. Must be positive.
 
         Returns:
-            ForecastOutput containing point predictions, uncertainty bounds,
-            and historical RMSE.
+            A ``ForecastOutput`` of length ``horizon``.
         """
 
     @abstractmethod
     def save(self, path: Path) -> None:
-        """Persist the trained model to disk.
+        """Persist the trained model to ``path``.
 
-        Saves all state needed to reproduce predictions after `load`. Called
-        once per trained forecaster; the simulation loads frozen forecasters
-        rather than retraining mid-experiment.
-
-        Args:
-            path: Destination path. Extension is forecaster-specific.
+        Implementations should write a single artifact (e.g. a pickle, a JSON +
+        weights bundle, or a directory) so that ``load`` can round-trip it.
         """
 
     @classmethod
     @abstractmethod
-    def load(cls, path: Path) -> Forecaster:
-        """Restore a previously saved model.
-
-        Inverse of `save`. Must round-trip cleanly: a loaded forecaster
-        produces identical predictions to the original.
+    def load(cls, path: Path) -> "Forecaster":
+        """Load a previously saved forecaster from ``path``.
 
         Args:
-            path: Path to the saved model artifact.
+            path: Same path passed to a prior ``save`` call.
 
         Returns:
-            A ready-to-predict Forecaster instance.
+            A forecaster ready to call ``predict``.
         """

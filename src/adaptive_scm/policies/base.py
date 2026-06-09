@@ -1,8 +1,9 @@
-"""Abstract base class and state container for inventory replenishment policies.
+"""Abstract policy interface and shared ``State`` dataclass.
 
-Defines the `Policy` interface that EOQ, OrderUpTo, and PPO all implement,
-plus the `State` dataclass passed to `select_action`. This module is imported
-by every concrete policy and by the simulation environment.
+Defines the two-method contract every replenishment policy (EOQ, OrderUpTo,
+PPO) must satisfy: ``select_action`` and ``reset``. The ``State`` dataclass is
+the common observation passed by the simulation environment; classical policies
+read named fields directly while PPO flattens it into a vector observation.
 """
 
 from __future__ import annotations
@@ -12,75 +13,71 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from adaptive_scm.forecasting.base import ForecastOutput
+
 
 @dataclass(frozen=True)
 class State:
-    """Observable state passed to a policy at each decision epoch.
+    """Decision-time state passed from the simulator to a policy.
 
-    Different policies consume different subsets: EOQ uses inventory_position
-    and forecast_mean; OrderUpTo additionally uses forecast_std; PPO uses
-    everything (the full vector is flattened inside the agent).
+    Holds everything a policy might need on a given day: current inventory,
+    outstanding orders in the pipeline, the latest forecast, day-of-week, and
+    upcoming event flags. Classical policies (EOQ, OrderUpTo) read a subset of
+    these; PPO's wrapper flattens them into its observation vector.
 
     Attributes:
-        on_hand: Current on-hand inventory in units.
-        pipeline: Outstanding orders by remaining lead time. Shape
-            (max_lead_time,). pipeline[i] is units arriving in i+1 days.
-        forecast_mean: Point forecast for the next horizon days, shape
-            (forecast_horizon,). Typically the 7-day slice used by PPO.
-        forecast_std: Forecast uncertainty (std) over the same horizon,
-            shape (forecast_horizon,).
-        day_of_week: One-hot encoding of current day-of-week, shape (7,).
-        upcoming_events: Binary event flags for the next 7 days, shape (7,).
-        time_index: Integer step within the current episode (0-indexed).
+        on_hand: Current physical inventory in units.
+        pipeline: Outstanding orders indexed by remaining lead time (in days).
+            ``pipeline[0]`` arrives today, ``pipeline[k]`` arrives in ``k`` days.
+        forecast: The latest ``ForecastOutput`` aligned to today as step 0.
+        day_of_week: Integer 0..6 for the current simulation day.
+        upcoming_events: Binary flags of length 7 indicating an event in each of
+            the next 7 days.
     """
 
     on_hand: float
     pipeline: np.ndarray
-    forecast_mean: np.ndarray
-    forecast_std: np.ndarray
-    day_of_week: np.ndarray
+    forecast: ForecastOutput
+    day_of_week: int
     upcoming_events: np.ndarray
-    time_index: int
 
     @property
     def inventory_position(self) -> float:
-        """Inventory position = on-hand + sum of pipeline orders.
+        """On-hand inventory plus all outstanding orders.
 
-        Standard textbook definition used by classical replenishment policies
-        (EOQ, OrderUpTo) when comparing against reorder points / targets.
+        Computed as ``on_hand + sum(pipeline)``. The standard reorder-point and
+        order-up-to formulas operate on inventory position rather than on-hand,
+        so this is exposed as a property for clarity.
+
+        Returns:
+            Total inventory position in units.
         """
-        return float(self.on_hand + self.pipeline.sum())
+        return float(self.on_hand) + float(self.pipeline.sum())
 
 
 class Policy(ABC):
-    """Abstract interface for all inventory replenishment policies.
+    """Abstract base class for all replenishment policies.
 
-    Every concrete policy (EOQ, OrderUpTo, PPO) implements this two-method
-    contract. The simulation environment calls `select_action` once per day
-    and `reset` at the start of each episode/replication.
+    Concrete policies are interchangeable from the simulator's perspective. The
+    simulator calls ``reset`` at episode start and ``select_action`` once per
+    decision epoch.
     """
 
     @abstractmethod
     def select_action(self, state: State) -> int:
-        """Choose the order quantity for the current decision epoch.
-
-        For classical policies this is a deterministic function of the state;
-        for PPO it samples from a learned stochastic policy (or returns the
-        deterministic mode at evaluation time).
+        """Return the integer order quantity for the current decision epoch.
 
         Args:
-            state: Current observable state.
+            state: Current ``State`` from the simulator.
 
         Returns:
-            Order quantity in units. Must be non-negative integer.
+            Non-negative integer order quantity in units.
         """
 
     @abstractmethod
     def reset(self) -> None:
-        """Reset any episode-internal state at the start of a new replication.
+        """Reset any per-episode internal state.
 
-        Stateless policies may implement this as a no-op. Stateful policies
-        (e.g., PPO with recurrent components, or order-up-to with a running
-        forecast cache) clear their per-episode state here. Called by the
-        runner before each replication.
+        Stateless policies may implement this as a no-op. Called by the
+        simulator at the start of every episode.
         """

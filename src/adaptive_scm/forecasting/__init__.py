@@ -1,1 +1,25 @@
-"""Sub-package placeholder. See PRD.md for module-by-module specification."""
+"""Forecasting models. ARIMA, XGBoost, and TFT all implement the ``Forecaster`` ABC.
+
+The base interface is always importable. Concrete forecasters depend on the
+optional ``forecasting`` / ``deep`` dependency groups, so they are imported
+defensively: if the backing library is absent, the symbol is simply not
+exported rather than breaking ``import adaptive_scm.forecasting``.
+"""
+
+from adaptive_scm.forecasting.base import ForecastOutput, Forecaster
+
+__all__ = ["Forecaster", "ForecastOutput"]
+
+try:
+    from adaptive_scm.forecasting.arima import ARIMAForecaster  # noqa: F401
+
+    __all__.append("ARIMAForecaster")
+except ImportError:  # pragma: no cover - exercised only without the forecasting extra
+    pass
+
+try:
+    from adaptive_scm.forecasting.xgboost import XGBoostForecaster  # noqa: F401
+
+    __all__.append("XGBoostForecaster")
+except ImportError:  # pragma: no cover - exercised only without the forecasting extra
+    pass

@@ -1,13 +1,8 @@
-"""Structured logging configuration using structlog.
+"""Structured logging configuration.
 
-Configures structlog with a JSON renderer for production and a colored
-console renderer for development. All modules import `get_logger` from
-here; no `print()` calls are allowed anywhere in `src/` (PRD §2.3).
-
-Usage:
-    from adaptive_scm.utils.logging import get_logger
-    log = get_logger(__name__)
-    log.info("training_started", forecaster="arima", n_epochs=50)
+Single entrypoint ``get_logger`` returns a configured ``structlog`` logger. All
+modules in the package use this instead of ``print``. Configuration is process-
+global and applied lazily on first call.
 """
 
 from __future__ import annotations
@@ -18,59 +13,60 @@ from typing import Any
 
 import structlog
 
+_CONFIGURED = False
 
-def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
-    """Configure the global structlog pipeline.
 
-    Idempotent — safe to call multiple times. Called once at the start of
-    every CLI entry point in `scripts/`. JSON output is intended for
-    file-based logs during long experiment runs; colored console output
-    is for interactive development.
+def _configure(level: int = logging.INFO) -> None:
+    """Configure ``structlog`` once per process.
+
+    Applies a JSON-friendly key-value renderer for production runs and wires
+    structlog into the stdlib logging system so third-party libraries (xgboost,
+    pytorch-lightning) also flow through the same handler. Called lazily by
+    ``get_logger``; safe to call multiple times.
 
     Args:
-        level: Standard logging level name (DEBUG, INFO, WARNING, ERROR).
-        json_output: If True, emit JSON lines; otherwise emit colored text.
+        level: Stdlib logging level for the root logger.
     """
-    log_level = getattr(logging, level.upper(), logging.INFO)
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
 
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=log_level,
+        level=level,
     )
-
-    processors: list[Any] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-    ]
-
-    if json_output:
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
 
     structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.dev.ConsoleRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(level),
         cache_logger_on_first_use=True,
     )
+    _CONFIGURED = True
 
 
-def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
-    """Return a bound structlog logger for the given module.
+def get_logger(name: str | None = None, **initial_context: Any) -> structlog.BoundLogger:
+    """Return a configured structlog logger.
 
-    Wraps structlog.get_logger so call sites have a single, typed import
-    path. Pass `__name__` so log records carry the module name.
+    Lazily initializes process-wide logging on first call, then returns a bound
+    logger with optional initial context (e.g. ``run_id``, ``forecaster``) that
+    will be attached to every log record from that logger.
 
     Args:
-        name: Module name, typically `__name__`.
+        name: Optional logger name (typically ``__name__`` of the caller).
+        **initial_context: Key-value pairs bound into the returned logger.
 
     Returns:
-        A structlog BoundLogger ready to emit structured events.
+        A ``structlog.BoundLogger`` ready for use.
     """
-    return structlog.get_logger(name)
+    _configure()
+    logger = structlog.get_logger(name)
+    if initial_context:
+        logger = logger.bind(**initial_context)
+    return logger

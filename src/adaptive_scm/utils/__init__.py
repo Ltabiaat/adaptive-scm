@@ -1,1 +1,1 @@
-"""Sub-package placeholder. See PRD.md for module-by-module specification."""
+"""Cross-cutting utilities: structured logging and reproducibility seeding."""

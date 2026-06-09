@@ -1,9 +1,2 @@
-# EOQ policy configuration (PRD Feature 5 / §5)
-
-policy:
-  name: eoq
-  service_level: 0.95
-  # Derived: z-score for service_level — set automatically by EOQ policy code,
-  # but exposed here so it can be overridden for sensitivity analysis.
-  # 1.645 corresponds to 95% cycle service.
-  z_score: 1.645
+# Override fragment for the EOQ policy. Composed with config/default.yaml.
+service_level: 0.95

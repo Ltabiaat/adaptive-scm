@@ -1,8 +1,7 @@
-"""Adaptive Supply Chain Optimization System.
+"""Adaptive supply chain optimization package.
 
-End-to-end research package comparing demand forecasting methods (ARIMA,
-XGBoost, TFT) coupled with inventory policies (EOQ, order-up-to, PPO) on
-the M5 Walmart dataset. See PRD.md for full specification.
+Top-level namespace for the thesis implementation. Submodules: data, forecasting,
+policies, simulation, evaluation, utils.
 """
 
 __version__ = "0.1.0"

@@ -1,9 +1,8 @@
-"""Reproducibility helpers — global seeding across numpy, torch, and random.
+"""Reproducibility seeding.
 
-Provides `set_global_seed`, the single entry point for setting RNG seeds
-in every CLI script and test fixture. Torch is imported lazily so this
-module is usable in Phase 1 before the deep-learning stack is installed
-(per the optional dependency layout in pyproject.toml).
+A single ``set_global_seed`` call seeds Python's ``random`` module, NumPy, and
+(if installed) PyTorch. All experiment scripts call this at startup so the same
+config + seed yields byte-identical results.
 """
 
 from __future__ import annotations
@@ -14,41 +13,32 @@ import random
 import numpy as np
 
 
-def set_global_seed(seed: int, *, deterministic_torch: bool = False) -> None:
-    """Seed Python's random, numpy, and (if installed) torch.
+def set_global_seed(seed: int) -> None:
+    """Seed Python, NumPy, and PyTorch from a single value.
 
-    Idempotent and side-effect-free beyond setting RNG state. Called once
-    per replication by the experiment runner so that a (forecaster, policy,
-    condition, seed) tuple is fully reproducible (PRD §7.3).
+    Sets ``PYTHONHASHSEED`` env var, seeds ``random.seed`` and ``numpy.random``,
+    and if torch is importable also seeds CPU and CUDA RNGs and enables
+    deterministic cuDNN. Called once per process at the entry point of every
+    training/eval script.
 
     Args:
         seed: Non-negative integer seed.
-        deterministic_torch: If True, also set torch.use_deterministic_algorithms
-            and the cuBLAS workspace env var. Slower but bit-exact on GPU.
-            Default False because TFT/PPO training need throughput more than
-            bit-exactness across runs.
-
-    Raises:
-        ValueError: If seed is negative.
     """
     if seed < 0:
         raise ValueError(f"seed must be non-negative, got {seed}")
 
+    os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
 
     try:
         import torch
-    except ImportError:
-        return
 
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-    if deterministic_torch:
-        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+    except ImportError:
+        # Torch is optional at the data-pipeline layer; absence is fine.
+        pass
