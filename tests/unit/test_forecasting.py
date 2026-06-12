@@ -341,3 +341,181 @@ class TestXGBoostSaveLoad:
     def test_save_before_fit_raises(self, tmp_path):
         with pytest.raises(RuntimeError, match="not fitted"):
             XGBoostForecaster().save(tmp_path / "x.joblib")
+
+
+# --------------------------------------------------------------------------- #
+# TFT (Feature 4)
+# --------------------------------------------------------------------------- #
+
+# Tiny network + few epochs: the test verifies the contract, not accuracy.
+_TFT_TEST_KWARGS = dict(
+    hidden_size=4,
+    attention_head_size=1,
+    max_epochs=3,
+    early_stopping_patience=10,
+    batch_size=32,
+    encoder_length=28,
+)
+
+
+@pytest.fixture(scope="session")
+def tft_training_frame(synthetic_m5_dir, synthetic_item_store) -> pd.DataFrame:
+    """Engineered, split-labeled frame sized for a fast TFT fit.
+
+    300 train days keeps epochs quick while satisfying
+    ``encoder_length + horizon`` and giving the encoder several seasonal
+    cycles. Session scoped to share across TFT tests.
+
+    Returns:
+        DataFrame with engineered features and a ``split`` column.
+    """
+    item_id, store_id = synthetic_item_store
+    raw = load_m5_series(synthetic_m5_dir, item_id=item_id, store_id=store_id)
+    feat = engineer_features(raw)
+    return split_by_position(feat, train_days=300, val_days=28, test_days=28)
+
+
+@pytest.fixture(scope="session")
+def fitted_tft(tft_training_frame):
+    """A session-scoped TFT fitted once with the tiny test configuration.
+
+    Returns:
+        A fitted :class:`TFTForecaster`.
+    """
+    from adaptive_scm.forecasting import TFTForecaster
+    from adaptive_scm.utils.seeding import set_global_seed
+
+    set_global_seed(42)
+    forecaster = TFTForecaster(**_TFT_TEST_KWARGS)
+    forecaster.fit(tft_training_frame)
+    return forecaster
+
+
+def test_tft(fitted_tft):
+    """Top-level acceptance test named in PRD Feature 4 acceptance criteria.
+
+    Asserts interface compliance, a P10/P50/P90 forecast of the expected
+    shape, and convergence within the epoch cap.
+    """
+    from adaptive_scm.forecasting import TFTForecaster
+
+    assert isinstance(fitted_tft, Forecaster)
+    assert isinstance(fitted_tft, TFTForecaster)
+
+    out = fitted_tft.predict(_HORIZON)
+    assert isinstance(out, ForecastOutput)
+    assert out.horizon == _HORIZON
+    # ForecastOutput carries P10/P50/P90 as lower/point/upper (PRD criterion).
+    assert out.lower_bound is not None and out.lower_bound.shape == (_HORIZON,)
+    assert out.upper_bound is not None and out.upper_bound.shape == (_HORIZON,)
+    assert out.historical_rmse > 0
+
+    # "Training converges within max epochs" criterion: training completed
+    # and did not exceed the cap.
+    assert 1 <= fitted_tft.epochs_trained <= _TFT_TEST_KWARGS["max_epochs"]
+
+
+class TestTFTConstruction:
+    def test_rejects_bad_quantiles(self):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        with pytest.raises(ValueError, match="quantiles"):
+            TFTForecaster(quantiles=(0.1, 0.5))
+        with pytest.raises(ValueError, match="ascending"):
+            TFTForecaster(quantiles=(0.9, 0.5, 0.1))
+
+    def test_rejects_non_positive_sizes(self):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        with pytest.raises(ValueError, match="hidden_size"):
+            TFTForecaster(hidden_size=0)
+        with pytest.raises(ValueError, match="encoder_length"):
+            TFTForecaster(encoder_length=0)
+
+
+class TestTFTInterface:
+    def test_predict_before_fit_raises(self):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        with pytest.raises(RuntimeError, match="not fitted"):
+            TFTForecaster().predict(_HORIZON)
+
+    def test_historical_rmse_before_fit_raises(self):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        with pytest.raises(RuntimeError, match="historical_rmse"):
+            _ = TFTForecaster().historical_rmse
+
+    def test_rejects_non_positive_horizon(self, fitted_tft):
+        with pytest.raises(ValueError, match="horizon"):
+            fitted_tft.predict(0)
+
+    def test_rejects_horizon_beyond_prediction_length(self, fitted_tft):
+        # TFT forecasts in a single pass capped at the trained decoder length.
+        with pytest.raises(ValueError, match="single pass"):
+            fitted_tft.predict(_HORIZON + 1)
+
+    def test_fit_requires_train_and_val(self, tft_training_frame):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        only_train = tft_training_frame[tft_training_frame["split"] == "train"]
+        with pytest.raises(ValueError, match="non-empty"):
+            TFTForecaster(**_TFT_TEST_KWARGS).fit(only_train)
+
+
+class TestTFTForecastContract:
+    def test_quantiles_are_ordered(self, fitted_tft):
+        # P10 <= P50 <= P90 after the crossing repair (D-4.2).
+        out = fitted_tft.predict(_HORIZON)
+        assert (out.lower_bound <= out.point_forecast + 1e-6).all()
+        assert (out.point_forecast <= out.upper_bound + 1e-6).all()
+
+    def test_forecast_is_non_negative(self, fitted_tft):
+        out = fitted_tft.predict(_HORIZON)
+        assert (out.point_forecast >= 0).all()
+        assert (out.lower_bound >= 0).all()
+
+    def test_excludes_sales_derived_features(self, fitted_tft):
+        # Lag/rolling columns would leak future actuals in the decoder (D-4.1).
+        assert not any(
+            c.startswith("sales_lag_") or c.startswith("sales_roll_")
+            for c in fitted_tft._known_reals
+        )
+        # But known covariates (calendar/event/price) are present.
+        assert "price_index" in fitted_tft._known_reals
+        assert any(c.startswith("dow_") for c in fitted_tft._known_reals)
+
+    def test_shorter_horizon_is_prefix(self, fitted_tft):
+        # Single-pass forecast: a shorter horizon is a slice of the full one.
+        short = fitted_tft.predict(7).point_forecast
+        full = fitted_tft.predict(_HORIZON).point_forecast
+        np.testing.assert_allclose(short, full[:7], rtol=1e-6)
+
+    def test_prediction_is_deterministic(self, fitted_tft):
+        a = fitted_tft.predict(_HORIZON).point_forecast
+        b = fitted_tft.predict(_HORIZON).point_forecast
+        np.testing.assert_array_equal(a, b)
+
+
+class TestTFTSaveLoad:
+    def test_round_trip_preserves_predictions(self, fitted_tft, tmp_path):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        path = tmp_path / "tft_model"
+        fitted_tft.save(path)
+        assert (path / "model.ckpt").exists()
+        assert (path / "meta.joblib").exists()
+
+        loaded = TFTForecaster.load(path)
+        before = fitted_tft.predict(_HORIZON)
+        after = loaded.predict(_HORIZON)
+        np.testing.assert_allclose(before.point_forecast, after.point_forecast, rtol=1e-5)
+        np.testing.assert_allclose(before.lower_bound, after.lower_bound, rtol=1e-5)
+        np.testing.assert_allclose(before.upper_bound, after.upper_bound, rtol=1e-5)
+        assert before.historical_rmse == pytest.approx(after.historical_rmse)
+
+    def test_save_before_fit_raises(self, tmp_path):
+        from adaptive_scm.forecasting import TFTForecaster
+
+        with pytest.raises(RuntimeError, match="not fitted"):
+            TFTForecaster().save(tmp_path / "x")

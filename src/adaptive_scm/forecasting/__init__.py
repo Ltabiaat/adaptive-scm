@@ -23,3 +23,10 @@ try:
     __all__.append("XGBoostForecaster")
 except ImportError:  # pragma: no cover - exercised only without the forecasting extra
     pass
+
+try:
+    from adaptive_scm.forecasting.tft import TFTForecaster  # noqa: F401
+
+    __all__.append("TFTForecaster")
+except ImportError:  # pragma: no cover - exercised only without the deep extra
+    pass

@@ -21,9 +21,10 @@ uv run black src/ tests/                      # format
 ## Status
 
 - **Phase 0 — Scaffold**: ✅ complete.
-- **Phase 1 — Foundation (Feature 1 + Feature 5)**: ✅ data pipeline and EOQ policy, 31 unit tests passing.
-- Phase 2 — Forecasting (ARIMA, XGBoost, TFT): not started.
-- Phase 3+ — Simulation, PPO, experiments, analysis: not started.
+- **Phase 1 — Foundation (Feature 1 + Feature 5)**: ✅ data pipeline and EOQ policy.
+- **Phase 2 — Forecasting (Features 2, 3, 4)**: ✅ ARIMA, XGBoost, and TFT all pass the gate (`tests/unit/test_forecasting.py`); 76 unit tests total.
+- Phase 3 — Simulation core (order-up-to, Gym env, disruptions): not started.
+- Phase 4+ — PPO, experiments, analysis: not started.
 
 ## Layout
 

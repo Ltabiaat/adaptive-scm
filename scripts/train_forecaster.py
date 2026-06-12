@@ -17,7 +17,7 @@ import click
 import pandas as pd
 from omegaconf import OmegaConf
 
-from adaptive_scm.forecasting import ARIMAForecaster, XGBoostForecaster
+from adaptive_scm.forecasting import ARIMAForecaster, TFTForecaster, XGBoostForecaster
 from adaptive_scm.utils.logging import get_logger
 from adaptive_scm.utils.seeding import set_global_seed
 
@@ -80,6 +80,32 @@ def _build_xgboost(cfg) -> XGBoostForecaster:
     )
 
 
+def _build_tft(cfg) -> TFTForecaster:
+    """Construct a :class:`TFTForecaster` from the merged config.
+
+    Reads the ``forecasters.tft`` block. ``encoder_length`` falls back to 56
+    days if absent (D-4.3). Isolated as a helper alongside the ARIMA and
+    XGBoost builders.
+
+    Args:
+        cfg: OmegaConf config node for the whole project.
+
+    Returns:
+        An unfitted :class:`TFTForecaster`.
+    """
+    t = cfg.forecasters.tft
+    return TFTForecaster(
+        learning_rate=t.learning_rate,
+        batch_size=t.batch_size,
+        max_epochs=t.max_epochs,
+        early_stopping_patience=t.early_stopping_patience,
+        hidden_size=t.hidden_size,
+        attention_head_size=t.attention_head_size,
+        encoder_length=t.get("encoder_length", 56),
+        quantiles=tuple(t.quantiles),
+    )
+
+
 @click.command()
 @click.option(
     "--model",
@@ -127,13 +153,17 @@ def main(model: str, config_path: Path, seed: int) -> None:
         forecaster = _build_arima(cfg)
     elif model == "xgboost":
         forecaster = _build_xgboost(cfg)
+    elif model == "tft":
+        forecaster = _build_tft(cfg)
     else:
         raise NotImplementedError(f"forecaster {model!r} is not implemented yet")
 
     forecaster.fit(df)
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = _RESULTS_DIR / f"forecaster_{model}.joblib"
+    # TFT saves a directory (checkpoint + metadata); the others a single file.
+    suffix = "" if model == "tft" else ".joblib"
+    out_path = _RESULTS_DIR / f"forecaster_{model}{suffix}"
     forecaster.save(out_path)
     _LOG.info(
         "trained_forecaster",

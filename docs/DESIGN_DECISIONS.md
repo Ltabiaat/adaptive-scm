@@ -165,4 +165,60 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 ---
 
-_Last updated: Phase 3 (XGBoost). Append new entries as later features land._
+## Phase 4 — TFT forecaster (Feature 4)
+
+### D-4.1 Sales-derived features excluded from TFT inputs 🔴
+- **What:** TFT consumes raw ``sales`` as its time-varying *unknown* plus the
+  calendar/event/price features as time-varying *known* reals. The engineered
+  ``sales_lag_*`` and ``sales_roll_*`` columns are **excluded** entirely.
+- **Why:** In the decoder (forecast) window those columns contain *future
+  actuals* — e.g. ``sales_lag_1`` of day t+2 is day t+1's actual sales — so
+  passing them as "known" covariates would leak the test answer. TFT learns
+  the autoregressive structure through its encoder from raw sales instead,
+  which is exactly the PRD's input partitioning ("time-varying unknown:
+  historical sales").
+- **Change it:** Don't. If lag features are ever wanted, they must be moved to
+  the *unknown* group (where the decoder cannot see them), which adds nothing
+  beyond the raw series.
+
+### D-4.2 Quantile crossing repaired by sorting 🟡
+- **What:** Predicted quantiles are sorted along the quantile axis before
+  mapping P10/P50/P90 to lower/point/upper, then floored at zero (D-2.2).
+- **Why:** Quantile-loss models can emit crossed quantiles (P10 > P50),
+  especially early in training; pytorch-forecasting does not enforce
+  monotonicity. Sorting is the standard non-crossing repair and is a no-op
+  when quantiles are already ordered.
+- **Change it:** Remove the ``np.sort`` in ``predict`` and assert ordering
+  instead, if you'd rather treat crossing as a training failure.
+
+### D-4.3 Additive ``encoder_length`` config knob (default 56) 🟡
+- **What:** The PRD does not specify the encoder window. Added
+  ``encoder_length`` to the tft config block, default 56 days (8 weeks = 2×
+  the 28-day horizon).
+- **Why:** The encoder window is a required TimeSeriesDataSet parameter; 2×
+  horizon covering several weekly cycles is a common, defensible default.
+- **Change it:** Edit ``config/forecasters/tft.yaml``; it's purely config.
+
+### D-4.4 TFT saves a directory (checkpoint + metadata) 🟢
+- **What:** ``save(path)`` writes a directory containing ``model.ckpt``
+  (Lightning checkpoint) and ``meta.joblib`` (stored frame, dataset
+  parameters, RMSE), unlike ARIMA/XGBoost's single joblib file. ``save``
+  requires the originally fitted instance (a loaded instance cannot re-save).
+- **Why:** Lightning's checkpoint format is the robust way to round-trip a
+  TFT; the metadata sidecar carries what the checkpoint can't. The
+  ``Forecaster`` ABC explicitly allows directory artifacts. Re-saving a
+  loaded model is not needed in the train-once / evaluate-many workflow.
+- **Change it:** Bundle both into one ``torch.save`` payload if a single file
+  is ever required.
+
+### D-4.5 ``historical_rmse`` = P50 vs validation actuals 🟢
+- **What:** TFT's ``historical_rmse`` is the RMSE of its P50 forecast over the
+  28-day validation horizon, computed via the same single-pass ``predict``
+  path used at evaluation time.
+- **Why:** Consistent with D-2.1/D-3.4: every forecaster's ``historical_rmse``
+  measures the *deployed* multi-step forecast against held-out validation data.
+- **Change it:** Nothing to change unless D-2.1 changes.
+
+---
+
+_Last updated: Phase 4 (TFT). Append new entries as later features land._

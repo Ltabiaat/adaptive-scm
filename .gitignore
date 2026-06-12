@@ -13,6 +13,7 @@ htmlcov/
 data/raw/
 data/processed/
 results/
+lightning_logs/
 
 # Notebooks
 .ipynb_checkpoints/
