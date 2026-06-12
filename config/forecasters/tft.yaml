@@ -9,3 +9,7 @@ attention_head_size: 4
 
 # Encoder window in days (additive knob, D-4.3). 56 = 8 weeks = 2x horizon.
 encoder_length: 56
+
+# Lightning accelerator: cpu (default, reliable everywhere incl. Apple Silicon),
+# or gpu/auto on CUDA machines (D-4.6).
+accelerator: cpu

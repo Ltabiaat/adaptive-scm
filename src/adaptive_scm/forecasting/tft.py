@@ -73,6 +73,7 @@ class TFTForecaster(Forecaster):
         attention_head_size: int = 4,
         encoder_length: int = 56,
         quantiles: tuple[float, ...] = _QUANTILES,
+        accelerator: str = "cpu",
     ) -> None:
         """Configure model and training hyperparameters.
 
@@ -90,6 +91,9 @@ class TFTForecaster(Forecaster):
             attention_head_size: Number of attention heads.
             encoder_length: History window (days) the encoder consumes.
             quantiles: Three ascending quantiles (lower, point, upper).
+            accelerator: Lightning accelerator string. Defaults to ``"cpu"``
+                because TFT on Apple's MPS backend is unreliable (D-4.6);
+                set ``"gpu"`` or ``"auto"`` in config on CUDA machines.
 
         Raises:
             ValueError: If ``quantiles`` is not three ascending values in (0, 1),
@@ -118,6 +122,7 @@ class TFTForecaster(Forecaster):
         self._attention_heads = int(attention_head_size)
         self._encoder_length = int(encoder_length)
         self._quantiles = tuple(float(q) for q in quantiles)
+        self._accelerator = str(accelerator)
 
         self._model = None  # fitted TemporalFusionTransformer
         self._frame: pd.DataFrame | None = None  # slim frame with time_idx
@@ -234,7 +239,7 @@ class TFTForecaster(Forecaster):
             trainer = L.Trainer(
                 max_epochs=self._max_epochs,
                 callbacks=[EarlyStopping(monitor="val_loss", patience=self._patience)],
-                accelerator="auto",
+                accelerator=self._accelerator,
                 enable_progress_bar=False,
                 enable_model_summary=False,
                 logger=False,
@@ -303,6 +308,7 @@ class TFTForecaster(Forecaster):
                 dl,
                 mode="quantiles",
                 trainer_kwargs={
+                    "accelerator": self._accelerator,
                     "logger": False,
                     "enable_progress_bar": False,
                     "enable_model_summary": False,
@@ -348,6 +354,7 @@ class TFTForecaster(Forecaster):
                 "epochs_trained": self._epochs_trained,
                 "dataset_parameters": self._dataset_params,
                 "batch_size": self._batch_size,
+                "accelerator": self._accelerator,
             },
             path / _META_NAME,
         )
@@ -370,7 +377,7 @@ class TFTForecaster(Forecaster):
 
         path = Path(path)
         meta = joblib.load(path / _META_NAME)
-        instance = cls(batch_size=meta["batch_size"])
+        instance = cls(batch_size=meta["batch_size"], accelerator=meta.get("accelerator", "cpu"))
         instance._model = TemporalFusionTransformer.load_from_checkpoint(
             path / _CKPT_NAME, map_location="cpu"
         )

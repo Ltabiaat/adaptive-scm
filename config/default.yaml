@@ -60,6 +60,7 @@ forecasters:
     hidden_size: 16
     attention_head_size: 4
     encoder_length: 56
+    accelerator: cpu
 
 policies:
   eoq:

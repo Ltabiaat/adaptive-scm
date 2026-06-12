@@ -219,6 +219,17 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   measures the *deployed* multi-step forecast against held-out validation data.
 - **Change it:** Nothing to change unless D-2.1 changes.
 
+### D-4.6 TFT trainer defaults to CPU; accelerator is a config knob 🟡
+- **What:** The Lightning trainer in both ``fit`` and ``predict`` uses
+  ``accelerator: cpu`` by default, configurable via
+  ``forecasters.tft.accelerator``. Previously ``"auto"``.
+- **Why:** ``auto`` selects Apple's MPS backend on M-series Macs, where
+  pytorch-forecasting's TFT hangs (observed: unit test froze indefinitely at
+  the first TFT fit). CPU is correct everywhere and matches the PRD's
+  "must run on CPU as a fallback" requirement. On a CUDA machine, set
+  ``accelerator: gpu`` (or ``auto``) in config for the real training runs.
+- **Change it:** Edit ``config/forecasters/tft.yaml``; it's purely config.
+
 ---
 
 _Last updated: Phase 4 (TFT). Append new entries as later features land._

@@ -102,6 +102,7 @@ def _build_tft(cfg) -> TFTForecaster:
         hidden_size=t.hidden_size,
         attention_head_size=t.attention_head_size,
         encoder_length=t.get("encoder_length", 56),
+        accelerator=t.get("accelerator", "cpu"),
         quantiles=tuple(t.quantiles),
     )
 
