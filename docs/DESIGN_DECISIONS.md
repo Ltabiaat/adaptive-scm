@@ -230,6 +230,23 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   ``accelerator: gpu`` (or ``auto``) in config for the real training runs.
 - **Change it:** Edit ``config/forecasters/tft.yaml``; it's purely config.
 
+### D-4.7 Test suite loads torch before xgboost (macOS libomp clash) 🟡
+- **What:** ``tests/conftest.py`` imports ``torch`` at the very top (before any
+  test module can import xgboost) and, on macOS only, sets
+  ``KMP_DUPLICATE_LIB_OK=TRUE`` for the test session.
+- **Why:** xgboost and torch each bundle their own OpenMP runtime; with both
+  loaded into one process — which happens only in the unit-test suite, where
+  TFT tests follow XGBoost tests — the second runtime can deadlock on macOS.
+  Observed as a silent freeze at the first TFT fit (TFT tests passed in
+  isolation in 8s on the same machine). Loading torch first makes its libomp
+  the resident runtime; the env var is the documented escape hatch for the
+  duplicate-runtime case. **Scope:** tests only. Production scripts
+  (``train_forecaster.py``, later ``train_ppo.py``) train one model per
+  process, so the clash cannot affect thesis results.
+- **Change it:** Remove the conftest block if the suite ever runs each test
+  file in its own process (e.g. pytest-xdist), or once upstream wheels share
+  a single libomp.
+
 ---
 
 _Last updated: Phase 4 (TFT). Append new entries as later features land._
