@@ -60,4 +60,5 @@ testpaths = ["tests"]
 addopts = "-ra -q --strict-markers"
 markers = [
     "tft: TFT tests; run in a separate process from xgboost tests (see D-4.7)",
+    "ppo: PPO tests; torch-backed, run in the same group as tft (see D-4.7)",
 ]

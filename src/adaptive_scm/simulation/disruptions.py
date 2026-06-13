@@ -55,29 +55,24 @@ class DemandSpikeWrapper(gym.Wrapper):
         self._multiplier = float(multiplier)
         self._start = int(start_day)
         self._end = int(start_day) + int(duration)
-        self._original_demand = env.unwrapped._episode.demand.copy()
-        self._apply()
-
-    def _apply(self) -> None:
-        """Scale the env's demand array within the window from the pristine copy.
-
-        Restores the original demand first, then multiplies the window slice, so
-        the disruption is exactly applied once regardless of how many times
-        ``reset`` has been called. Mutates the wrapped env's episode in place.
-        """
-        demand = self._original_demand.copy()
-        end = min(self._end, len(demand))
-        demand[self._start : end] *= self._multiplier
-        self.env.unwrapped._episode.demand = demand
 
     def reset(self, **kwargs):
-        """Re-apply the spike and delegate to the wrapped env's reset.
+        """Reset the env, then scale the realized demand within the window.
+
+        The base env resolves its realized demand during ``reset`` (fixed or
+        freshly generated). This wrapper then multiplies the in-window slice of
+        that realized demand, so the spike works whether demand is fixed or
+        generated, and is never compounded across resets (it always operates on
+        the env's freshly resolved demand).
 
         Returns:
             The wrapped env's ``(observation, info)``.
         """
-        self._apply()
-        return self.env.reset(**kwargs)
+        obs, info = self.env.reset(**kwargs)
+        env = self.env.unwrapped
+        end = min(self._end, len(env._demand))
+        env._demand[self._start : end] *= self._multiplier
+        return obs, info
 
 
 class LeadTimeDisruptionWrapper(gym.Wrapper):

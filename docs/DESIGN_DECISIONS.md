@@ -323,4 +323,79 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 ---
 
-_Last updated: Phase 3 (simulation core). Append new entries as later features land._
+## Phase 4 — PPO integration (Feature 9)
+
+### D-9.1 PPO and the env share one state-flattening function 🟡
+- **What:** ``simulation/environment.py::state_to_observation`` is the single
+  place a :class:`State` becomes the flat observation vector. The env's
+  ``_observation`` and ``PPOAgent.select_action`` both call it.
+- **Why:** If the env flattened the state one way during training and the agent
+  another way at decision time, PPO would see inconsistent inputs and silently
+  underperform. One function guarantees they match.
+- **Change it:** Nothing; this is a correctness invariant.
+
+### D-9.2 Training episodes randomized via an episode factory 🟡
+- **What:** ``InventoryEnv`` gained an optional ``episode_factory`` callable
+  ``(rng) -> EpisodeData`` invoked on each ``reset``.
+  ``make_training_episode_factory`` samples a random start index into the
+  training series each episode (PRD "episodes randomized across the training
+  period"). Evaluation passes no factory (fixed window).
+- **Why:** PPO must see varied episodes to generalize rather than overfit one
+  demand path. The factory keeps this opt-in so the deterministic eval/test
+  path is unchanged.
+- **Change it:** Pass a different factory (e.g. fixed start) to change the
+  training distribution.
+
+### D-9.3 Env generates stochastic demand from the forecast 🔴
+- **What:** ``EpisodeData.demand`` is now optional. When absent, the env
+  generates demand on each reset as
+  ``round(max(0, forecast_mean * LogNormal(-s^2/2, s)))`` with ``s`` the per-day
+  coefficient of variation ``forecast_std/forecast_mean`` (clipped to [0, 2]).
+  The ``-s^2/2`` drift makes the multiplier mean 1, so demand is unbiased around
+  the forecast (PRD Feature 7: "demand = forecast_value × lognormal_noise").
+- **Why:** Replications differ precisely by their demand draws, so the env must
+  generate demand rather than take it fixed. Using the CV as the lognormal shape
+  ties demand volatility to forecast uncertainty. **This affects every
+  simulation result**, so the exact noise model is worth scrutiny.
+- **Change it:** Adjust the ``s`` mapping or distribution in
+  ``InventoryEnv._resolve_demand``. Pass an explicit ``demand`` array to bypass
+  generation entirely (deterministic replays / tests).
+
+### D-9.4 PPO returns order units, not the raw action index 🟡
+- **What:** ``PPOAgent.select_action`` returns an order quantity in units
+  (chosen ``multiplier * d_bar``), matching the classical policies' contract;
+  the runner maps it back to the discrete action via ``env.order_units``. The
+  raw index is available separately via ``action_index``.
+- **Why:** Keeps the ``Policy.select_action`` contract uniform across EOQ /
+  OrderUpTo / PPO so the experiment runner treats all policies identically
+  (D-7.2). The units → index round-trip is lossless because PPO's units come
+  from the same grid ``order_units`` inverts.
+- **Change it:** Have the runner special-case PPO and call ``action_index``
+  directly if you prefer to skip the round-trip.
+
+### D-9.5 PPO frozen-forecaster signal = sales level + RMSE uncertainty 🔴
+- **What:** ``build_forecast_arrays`` sets ``forecast_mean`` to the series'
+  sales level and ``forecast_std`` to the forecaster's ``historical_rmse`` held
+  constant per day. The env then adds demand noise (D-9.3). The forecaster is
+  loaded read-only; only its RMSE enters the simulation.
+- **Why:** A pragmatic realization of "frozen forecaster generates the forecast
+  in the state" that avoids rolling re-forecasts at every historical day (which
+  the PRD does not require for training). The forecaster's *accuracy* (RMSE) is
+  what differentiates forecasters in the simulation, which is the H3 question.
+- **Change it:** Replace with true rolling per-day forecasts in
+  ``simulation/episodes.py`` if you want the forecaster's bias (not just its
+  variance) to flow into the sim — heavier, and a Phase 5+ consideration.
+
+### D-9.6 ``ppo.py`` imports simulation lazily (circular-import break) 🟢
+- **What:** ``PPOAgent`` imports ``state_to_observation`` / ``ACTION_MULTIPLIERS``
+  inside the methods that use them, not at module top.
+- **Why:** ``simulation`` imports ``policies`` (for ``State``) and ``policies``
+  imports ``simulation`` (for the flattener); a top-level import created a cycle
+  that silently dropped ``PPOAgent`` from the package namespace. Lazy imports
+  break the cycle cleanly.
+- **Change it:** Move the flattener to a neutral module both packages import, if
+  a non-lazy import is preferred.
+
+---
+
+_Last updated: Phase 4 (PPO). Append new entries as later features land._

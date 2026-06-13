@@ -11,6 +11,11 @@ from adaptive_scm.simulation.disruptions import (
     LeadTimeDisruptionWrapper,
 )
 from adaptive_scm.simulation.environment import EnvConfig, EpisodeData, InventoryEnv
+from adaptive_scm.simulation.episodes import (
+    build_eval_episode,
+    build_forecast_arrays,
+    make_training_episode_factory,
+)
 
 __all__ = [
     "InventoryEnv",
@@ -18,4 +23,7 @@ __all__ = [
     "EpisodeData",
     "DemandSpikeWrapper",
     "LeadTimeDisruptionWrapper",
+    "build_forecast_arrays",
+    "build_eval_episode",
+    "make_training_episode_factory",
 ]

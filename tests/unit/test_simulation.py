@@ -209,7 +209,8 @@ class TestDisruptions:
             start_day=7,
             duration=14,
         )
-        d = spiked.unwrapped._episode.demand
+        spiked.reset(seed=1)
+        d = spiked.unwrapped._demand  # realized demand after reset
         assert d[6] == pytest.approx(10.0)  # before window
         assert d[7] == pytest.approx(15.0)  # window start
         assert d[20] == pytest.approx(15.0)  # window end (inclusive)
@@ -219,8 +220,8 @@ class TestDisruptions:
         spiked = DemandSpikeWrapper(InventoryEnv(_config(), _episode(), seed=1), multiplier=1.5)
         spiked.reset(seed=1)
         spiked.reset(seed=1)
-        # Not compounded: still 15, not 22.5.
-        assert spiked.unwrapped._episode.demand[7] == pytest.approx(15.0)
+        # Not compounded: still 15, not 22.5 (each reset re-resolves demand).
+        assert spiked.unwrapped._demand[7] == pytest.approx(15.0)
 
     def test_demand_spike_rejects_bad_multiplier(self):
         with pytest.raises(ValueError, match="multiplier"):

@@ -33,6 +33,33 @@ FORECAST_WINDOW = 7
 ACTION_MULTIPLIERS = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)
 
 
+def state_to_observation(state: State) -> np.ndarray:
+    """Flatten a :class:`State` into the env's Box observation vector.
+
+    Concatenates on-hand, pipeline, the forecast mean and SD windows, the
+    day-of-week one-hot, and the upcoming-event flags into a single float32
+    array. Shared by the environment (PPO-facing observation) and the PPO
+    agent (which flattens an incoming state at decision time), so the agent's
+    input is identical in training and evaluation (D-9.1).
+
+    Args:
+        state: The structured state to flatten.
+
+    Returns:
+        Float32 observation array.
+    """
+    return np.concatenate(
+        [
+            np.array([state.on_hand], dtype=np.float32),
+            state.pipeline.astype(np.float32),
+            state.forecast_mean.astype(np.float32),
+            state.forecast_std.astype(np.float32),
+            state.day_of_week.astype(np.float32),
+            state.upcoming_events.astype(np.float32),
+        ]
+    )
+
+
 @dataclass(frozen=True)
 class EnvConfig:
     """Cost, lead-time, and episode parameters for :class:`InventoryEnv`.
@@ -65,26 +92,29 @@ class EnvConfig:
 class EpisodeData:
     """Per-episode ground-truth and forecast inputs.
 
-    Supplies the environment with the realized-demand series the world will
-    follow and the forecast the agent is allowed to see, plus calendar context.
-    All arrays are indexed by episode day; forecast arrays must extend
-    ``FORECAST_WINDOW`` days beyond ``episode_length`` so the final day still
-    has a full forward window.
+    Supplies the environment with the forecast the agent sees plus calendar
+    context, and optionally a fixed realized-demand series. When ``demand`` is
+    ``None`` the environment generates demand on each reset from the forecast
+    via multiplicative lognormal noise (PRD Feature 7), so replications differ
+    by their demand draws. Tests pass an explicit ``demand`` for determinism.
+    Forecast arrays must extend ``FORECAST_WINDOW`` days beyond ``episode_length``
+    so the final day still has a full forward window.
 
     Attributes:
-        demand: Realized demand per day, length >= ``episode_length``.
         forecast_mean: Forecast point estimate per day, length
             >= ``episode_length + FORECAST_WINDOW``.
         forecast_std: Forecast-error SD per day, same length as ``forecast_mean``.
         day_of_week: Integer 0..6 per day, length >= ``episode_length``.
+        demand: Optional fixed realized demand per day, length
+            >= ``episode_length``. When ``None``, generated from the forecast.
         events: Binary event flag per day, length
             >= ``episode_length + FORECAST_WINDOW``.
     """
 
-    demand: np.ndarray
     forecast_mean: np.ndarray
     forecast_std: np.ndarray
     day_of_week: np.ndarray
+    demand: np.ndarray | None = None
     events: np.ndarray = field(default=None)  # type: ignore[assignment]
 
 
@@ -102,17 +132,28 @@ class InventoryEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, config: EnvConfig, episode: EpisodeData, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        config: EnvConfig,
+        episode: EpisodeData,
+        seed: int | None = None,
+        episode_factory=None,
+    ) -> None:
         """Build the environment from a config and an episode's data.
 
         Defines the action and observation spaces, stores the episode inputs,
-        and seeds the internal RNG used for stochastic lead times. Does not
-        start an episode; call :meth:`reset` first.
+        and seeds the internal RNG used for stochastic lead times and demand
+        generation. Does not start an episode; call :meth:`reset` first.
 
         Args:
             config: Cost / lead-time / episode parameters.
-            episode: Ground-truth demand and forecast inputs for one episode.
-            seed: Optional seed for the lead-time RNG (reproducibility).
+            episode: Forecast/calendar inputs (and optionally fixed demand) for
+                an episode. Used directly unless ``episode_factory`` is given.
+            seed: Optional seed for the env RNG (reproducibility).
+            episode_factory: Optional callable ``(rng) -> EpisodeData`` invoked
+                on each :meth:`reset` to draw a fresh episode (e.g. a randomized
+                start date for PPO training, D-9.2). When ``None``, the fixed
+                ``episode`` is reused every reset.
 
         Raises:
             ValueError: If the episode arrays are too short for the configured
@@ -121,6 +162,7 @@ class InventoryEnv(gym.Env):
         super().__init__()
         self._cfg = config
         self._episode = episode
+        self._episode_factory = episode_factory
         self._max_lead_time = config.lead_time_base + config.lead_time_max_additional
         self._validate_episode()
 
@@ -137,6 +179,8 @@ class InventoryEnv(gym.Env):
         # Mutable working lead time (the frozen config holds the default). The
         # lead-time disruption wrapper adjusts this rather than the config.
         self._lead_time_base = config.lead_time_base
+        # Realized demand for the current episode (set on reset).
+        self._demand = np.zeros(config.episode_length, dtype=float)
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
@@ -158,11 +202,41 @@ class InventoryEnv(gym.Env):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
+        if self._episode_factory is not None:
+            self._episode = self._episode_factory(self._rng)
+            self._validate_episode()
+        self._demand = self._resolve_demand()
         self._t = 0
         self._on_hand = float(self._episode.forecast_mean[0])
         self._pipeline = np.zeros(self._max_lead_time, dtype=float)
         self._lead_time_base = self._cfg.lead_time_base
         return self._observation(), {}
+
+    def _resolve_demand(self) -> np.ndarray:
+        """Return the realized demand for this episode.
+
+        Uses the episode's fixed ``demand`` array when present (deterministic
+        tests / replays); otherwise generates it from the forecast via
+        multiplicative lognormal noise (D-9.3): for each day,
+        ``demand = round(max(0, forecast_mean * LogNormal(-s^2/2, s)))`` with
+        ``s`` the per-day coefficient of variation ``forecast_std/forecast_mean``
+        (floored). The ``-s^2/2`` drift keeps the multiplier's mean at 1, so
+        demand is unbiased around the forecast.
+
+        Returns:
+            Realized demand array of length ``episode_length``.
+        """
+        n = self._cfg.episode_length
+        if self._episode.demand is not None:
+            return np.array(self._episode.demand[:n], dtype=float)  # copy, not view
+
+        mean = np.asarray(self._episode.forecast_mean[:n], dtype=float)
+        std = np.asarray(self._episode.forecast_std[:n], dtype=float)
+        cv = np.where(mean > 1e-9, std / np.maximum(mean, 1e-9), 0.0)
+        cv = np.clip(cv, 0.0, 2.0)
+        noise = self._rng.lognormal(mean=-(cv**2) / 2.0, sigma=cv)
+        demand = np.clip(mean * noise, 0.0, None)
+        return np.round(demand)
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         """Advance one day: place an order, receive arrivals, meet demand, cost.
@@ -191,7 +265,7 @@ class InventoryEnv(gym.Env):
         order_qty = self._action_to_quantity(action)
         self._place_order(order_qty)
 
-        demand = float(self._episode.demand[self._t])
+        demand = float(self._demand[self._t])
         sales = min(self._on_hand, demand)
         lost = demand - sales
         self._on_hand -= sales
@@ -316,25 +390,15 @@ class InventoryEnv(gym.Env):
     def _observation(self) -> np.ndarray:
         """Flatten the current state into the Box observation vector.
 
-        Concatenates on-hand, pipeline, forecast mean and SD windows, the
-        day-of-week one-hot, and the event window into a single float32 array
-        matching ``observation_space``. This is the PPO-facing view of the same
-        state :meth:`current_state` returns structured.
+        Delegates to :func:`state_to_observation` so the PPO-facing observation
+        is byte-identical to what a policy would flatten from
+        :meth:`current_state` — guaranteeing PPO sees the same inputs at
+        training and evaluation time.
 
         Returns:
             Float32 observation array.
         """
-        s = self.current_state()
-        return np.concatenate(
-            [
-                np.array([s.on_hand], dtype=np.float32),
-                s.pipeline.astype(np.float32),
-                s.forecast_mean.astype(np.float32),
-                s.forecast_std.astype(np.float32),
-                s.day_of_week.astype(np.float32),
-                s.upcoming_events.astype(np.float32),
-            ]
-        )
+        return state_to_observation(self.current_state())
 
     def _validate_episode(self) -> None:
         """Check the episode arrays are long enough for the configured horizon.
@@ -347,7 +411,7 @@ class InventoryEnv(gym.Env):
             ValueError: If any array is too short.
         """
         n = self._cfg.episode_length
-        if len(self._episode.demand) < n:
+        if self._episode.demand is not None and len(self._episode.demand) < n:
             raise ValueError(f"demand array shorter than episode_length ({n})")
         if len(self._episode.day_of_week) < n:
             raise ValueError(f"day_of_week array shorter than episode_length ({n})")
