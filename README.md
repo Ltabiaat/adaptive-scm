@@ -28,8 +28,8 @@ uv run black src/ tests/                      # format
 - **Phase 3 — Simulation core (Features 6, 7, 8)**: ✅ order-up-to policy, Gymnasium environment, disruption wrappers.
 - **Phase 4 — PPO integration (Feature 9)**: ✅ PPO agent, randomized training episodes, stochastic demand; integration gate passes.
 - **Phase 5 — Experiment orchestration (Features 10, 11)**: ✅ multi-replication runner, metrics (cost/fill/resilience), single-experiment + full-suite CLIs, Markdown summary report.
-- Phase 6 — Analysis & hypothesis tests (Feature 12): not started.
-- Phase 7 — Full 30-replication run on M5: not started.
+- **Phase 6 — Analysis & hypothesis tests (Feature 12)**: ✅ paired t-tests (H1, H2), Spearman RMSE-cost correlation (H3), `run_analysis.py` → `hypothesis_tests.md`.
+- Phase 7 — Full 30-replication run on M5: not started (execution, not coding; needs M5 CSVs in `data/raw/`).
 
 ## Layout
 

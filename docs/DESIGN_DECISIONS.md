@@ -460,4 +460,51 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 ---
 
-_Last updated: Phase 5 (orchestration). Append new entries as later features land._
+## Phase 6 — Analysis & hypothesis tests (Feature 12)
+
+### D-12.1 H2 baselines = the six classical-policy combinations 🟡
+- **What:** H2 ("integrated > standalone") compares TFT+PPO against the six
+  ``(forecaster, classical_policy)`` combinations — i.e. every combination using
+  EOQ or order-up-to. ARIMA+PPO and XGBoost+PPO are *not* in the baseline set.
+- **Why:** The PRD says "TFT+PPO vs each of the 6 baseline combinations"; the only
+  natural grouping that yields exactly six is the classical-policy combinations
+  (3 forecasters × 2 classical policies). "Standalone" is read as "uses a
+  non-learned inventory policy."
+- **Change it:** If "standalone" should instead mean the eight non-integrated
+  combinations (including the other two PPO cells), broaden the baseline set in
+  ``test_h2``.
+
+### D-12.2 Paired tests rely on shared replication seeds 🔴
+- **What:** H1/H2 use ``scipy.stats.ttest_rel`` (paired) on per-replication total
+  cost, aligning the two policies' cost arrays by replication index.
+- **Why:** ``run_experiment.py`` seeds replication ``r`` with ``base + r`` for
+  every policy, so the same ``r`` faces identical demand and lead-time draws
+  across policies — a genuine paired design with far more power than an unpaired
+  test. **Pairing is only valid if every cell was run with the same base seed and
+  replication count**; the runner enforces this, but a hand-run cell with a
+  different seed would silently break the pairing.
+- **Change it:** Switch to ``ttest_ind`` (unpaired) if cells are ever run with
+  unaligned seeds.
+
+### D-12.3 Per-replication cost reconstructed from daily rows 🟢
+- **What:** ``per_replication_costs`` re-derives each replication's total cost by
+  summing its daily ``holding + stockout + order`` rows, rather than persisting a
+  per-replication summary.
+- **Why:** Keeps the Phase 5 Parquet schema (daily rows + one summary row)
+  unchanged while giving the paired tests exact per-rep costs. The sum is exact,
+  not an approximation.
+- **Change it:** Persist explicit per-replication rows in
+  ``result_to_dataframe`` if direct access is preferred over reconstruction.
+
+### D-12.4 H3 verdict threshold 🟡
+- **What:** ``test_h3`` flags "supports H3" when the RMSE-cost Spearman
+  correlation is non-significant (p ≥ 0.05) **or** weak (|rho| < 0.3).
+- **Why:** H3 claims accuracy does *not* determine decision quality, so both a
+  non-significant and a significant-but-weak correlation are consistent with it.
+  The 0.3 cutoff is the conventional weak/moderate boundary.
+- **Change it:** Adjust the magnitude cutoff or drop the OR clause in
+  ``test_h3`` to require strict non-significance.
+
+---
+
+_Last updated: Phase 6 (analysis). Append new entries as later features land._
