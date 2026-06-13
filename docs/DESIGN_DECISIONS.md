@@ -248,4 +248,79 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 ---
 
-_Last updated: Phase 4 (TFT). Append new entries as later features land._
+## Phase 3 — Simulation core (Features 6, 7, 8)
+
+### D-5.1 Unified `State` shape matching the PPO observation 🟡
+- **What:** ``State`` was redesigned from a single ``forecast: ForecastOutput``
+  + ``int`` day-of-week into separate ``forecast_mean`` / ``forecast_std``
+  vectors, a one-hot ``day_of_week``, and a ``time_index`` — matching the PRD's
+  PPO observation (Feature 7). EOQ was updated to read the new fields; the
+  scaffold's ``test_state.py`` (from the initial commit) now validates this shape.
+- **Why:** The environment's native per-day observation and the policies' input
+  should be one object. This shape flattens almost directly into the PPO Box
+  observation, so classical policies and PPO provably face the same state
+  (supports the H1 comparison). Chosen over keeping the leaner ForecastOutput
+  shape because only EOQ used the old one and PPO needs the split vectors.
+- **Change it:** Revert ``policies/base.py`` and re-add a ``forecast`` field, but
+  then PPO's wrapper must reconstruct the split vectors itself.
+
+### D-5.2 EOQ / order-up-to safety stock reads `forecast_std`, not a scalar RMSE 🔴
+- **What:** Both classical policies now source the daily forecast-error SD
+  ``sigma_d`` from the state's ``forecast_std`` vector (mean over the relevant
+  window) rather than a single ``historical_rmse`` scalar. EOQ:
+  ``ss = z * mean(forecast_std[:L]) * sqrt(L)``. Order-up-to:
+  ``ss = z * mean(forecast_std[:R+L]) * sqrt(R+L)``.
+- **Why:** Keeps D-1.1's interpretation (``sigma`` is a *daily* error SD scaled
+  by ``sqrt(interval)``) while letting uncertainty vary by day and using the
+  exact same signal PPO sees in its observation. Supersedes the earlier
+  "historical_rmse proxy" wording of D-1.1 for the in-simulation policies.
+- **Change it:** Feed a flat ``forecast_std`` (every entry = ``historical_rmse``)
+  to recover the old scalar behavior; the runner controls what fills the vector.
+
+### D-7.1 One environment, two observation projections 🟡
+- **What:** ``InventoryEnv`` exposes both a flat ``Box`` observation (for PPO via
+  the standard Gym API) and a structured :class:`State` via ``current_state()``
+  (for classical policies). Both are built from the same internal variables —
+  ``_observation()`` literally flattens ``current_state()``.
+- **Why:** Guarantees the two policy families see identical information, so any
+  performance gap is attributable to the policy, not to differing inputs.
+- **Change it:** Nothing; this is core to the experimental design.
+
+### D-7.2 Classical policies map continuous orders to the discrete action grid 🟡
+- **What:** EOQ / order-up-to compute a continuous order quantity; the runner
+  converts it to the nearest discrete action via ``InventoryEnv.order_units``
+  (argmin distance to the ``{0, 0.5, … 5.0} × d_bar`` grid).
+- **Why:** The PRD fixes a ``Discrete(11)`` action space for PPO; running
+  classical policies through the *same* action space keeps the comparison fair
+  (both are limited to the same achievable order quantities). The alternative —
+  letting classical policies order exact continuous amounts — would give them an
+  unfair granularity advantage over PPO.
+- **Change it:** Have the runner call ``env.step`` with a continuous quantity via
+  a separate code path if you want classical policies unconstrained (changes the
+  comparison's fairness).
+
+### D-7.3 Arrivals processed before the day's order; init stock = first forecast 🟢
+- **What:** Each ``step`` rolls the pipeline and adds arrivals *before* placing
+  today's order (an order can't arrive the day it's placed), with orders landing
+  in pipeline slot ``lead - 1`` so realized lead time is exactly ``lead`` days.
+  ``reset`` initializes on-hand to ``forecast_mean[0]`` (a neutral non-empty
+  starting stock) rather than zero.
+- **Why:** Standard lost-sales inventory timing; verified day-by-day in tests.
+  A non-empty start avoids a guaranteed day-1 stockout artifact.
+- **Change it:** Initialize on-hand to 0 or a configured value in ``reset`` if a
+  cold start is preferred.
+
+### D-8.1 Disruptions are env wrappers; demand spike is unforecast 🟡
+- **What:** Demand spike (×1.5) and lead-time disruption (×2) are
+  ``gymnasium.Wrapper`` subclasses (PRD Feature 8). The spike scales the env's
+  *realized* demand only — the forecast the agent sees is unchanged, so the
+  disruption is a genuine surprise. Lead-time disruption inflates the env's
+  mutable working lead time within the window, restored after each step.
+- **Why:** Wrappers keep the core env untouched (PRD requirement). Not warning
+  the agent is the point of a resilience stress test.
+- **Change it:** Also perturb ``forecast_mean`` in the spike wrapper if you want
+  the agent to anticipate the disruption.
+
+---
+
+_Last updated: Phase 3 (simulation core). Append new entries as later features land._

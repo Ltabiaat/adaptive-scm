@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from adaptive_scm.forecasting.base import ForecastOutput
 from adaptive_scm.policies import EOQPolicy
 from adaptive_scm.policies.base import State
 
@@ -29,34 +28,31 @@ def _make_state(
 ) -> State:
     """Build a minimal :class:`State` for EOQ tests.
 
-    Wraps the boilerplate of constructing a flat-forecast :class:`ForecastOutput`
-    and a zero-pipeline :class:`State` so the actual test bodies stay focused
-    on the assertions. Used only inside this test module.
+    Constructs a flat forecast: every day's mean is ``point`` and every day's
+    forecast-error std is ``rmse``, so the EOQ math reduces to
+    ``mean_daily_demand = point`` and ``sigma_d = rmse`` exactly. Used only
+    inside this test module.
 
     Args:
-        point: Constant value for every day of the point forecast.
-        horizon: Forecast horizon length.
-        rmse: Historical RMSE attached to the forecast.
+        point: Constant value for every day of ``forecast_mean``.
+        horizon: Forecast-window length.
+        rmse: Constant per-day forecast-error std (every ``forecast_std`` entry).
         on_hand: On-hand inventory in units.
         pipeline: Optional pipeline-orders vector; defaults to all zeros.
 
     Returns:
         A :class:`State` ready to pass to :meth:`EOQPolicy.select_action`.
     """
-    forecast = ForecastOutput(
-        point_forecast=np.full(horizon, point, dtype=float),
-        lower_bound=None,
-        upper_bound=None,
-        historical_rmse=rmse,
-    )
     if pipeline is None:
         pipeline = np.zeros(5)
     return State(
         on_hand=on_hand,
         pipeline=pipeline,
-        forecast=forecast,
-        day_of_week=0,
+        forecast_mean=np.full(horizon, point, dtype=float),
+        forecast_std=np.full(horizon, rmse, dtype=float),
+        day_of_week=np.eye(7, dtype=np.int8)[0],
         upcoming_events=np.zeros(7, dtype=np.int8),
+        time_index=0,
     )
 
 
@@ -161,3 +157,77 @@ class TestEOQOrderQuantity:
         assert order > 0
         # And the safety-stock value used internally is positive (sanity).
         assert expected_ss > 0
+
+
+# --------------------------------------------------------------------------- #
+# Order-up-to (Feature 6)
+# --------------------------------------------------------------------------- #
+
+from adaptive_scm.policies import OrderUpToPolicy  # noqa: E402
+
+
+class TestOrderUpToConstruction:
+    def test_rejects_zero_lead_time(self):
+        with pytest.raises(ValueError, match="lead_time"):
+            OrderUpToPolicy(lead_time=0)
+
+    def test_rejects_zero_review_period(self):
+        with pytest.raises(ValueError, match="review_period"):
+            OrderUpToPolicy(lead_time=3, review_period=0)
+
+    def test_rejects_invalid_service_level(self):
+        with pytest.raises(ValueError, match="service_level"):
+            OrderUpToPolicy(lead_time=3, service_level=0.0)
+
+    def test_protection_interval(self):
+        assert OrderUpToPolicy(lead_time=3, review_period=1).protection_interval == 4
+
+
+class TestOrderUpToAction:
+    @pytest.fixture
+    def policy(self) -> OrderUpToPolicy:
+        return OrderUpToPolicy(lead_time=3, review_period=1, service_level=0.95)
+
+    def test_orders_gap_to_target(self, policy):
+        # R+L=4, mean=10, std=2: S = 40 + z(0.95)*sqrt(4)*2 = 40 + 1.6449*4.
+        state = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=20.0)
+        from scipy.stats import norm
+
+        expected_target = 40.0 + norm.ppf(0.95) * math.sqrt(4) * 2.0
+        expected_order = round(expected_target - 20.0)
+        assert policy.select_action(state) == expected_order
+
+    def test_no_order_when_above_target(self, policy):
+        state = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=200.0)
+        assert policy.select_action(state) == 0
+
+    def test_responds_to_inventory_position(self, policy):
+        # Higher inventory position -> smaller order (acceptance criterion).
+        low = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=10.0)
+        high = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=35.0)
+        assert policy.select_action(low) > policy.select_action(high)
+
+    def test_responds_to_forecast(self, policy):
+        # Higher forecast demand -> larger target -> larger order (criterion).
+        lo = _make_state(point=5.0, horizon=28, rmse=2.0, on_hand=20.0)
+        hi = _make_state(point=15.0, horizon=28, rmse=2.0, on_hand=20.0)
+        assert policy.select_action(hi) > policy.select_action(lo)
+
+    def test_pipeline_counts_toward_position(self, policy):
+        # Pipeline orders raise inventory position and reduce the order.
+        pipe = np.array([0.0, 0.0, 30.0, 0.0, 0.0])
+        with_pipe = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=10.0, pipeline=pipe)
+        without = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=10.0)
+        assert policy.select_action(with_pipe) < policy.select_action(without)
+
+    def test_deterministic(self, policy):
+        state = _make_state(point=10.0, horizon=28, rmse=2.0, on_hand=15.0)
+        assert policy.select_action(state) == policy.select_action(state)
+
+    def test_window_clamped_to_horizon(self):
+        # Protection interval 10 but forecast horizon only 7: window clamps,
+        # no index error, still produces a valid order.
+        policy = OrderUpToPolicy(lead_time=9, review_period=1)
+        state = _make_state(point=10.0, horizon=7, rmse=2.0, on_hand=5.0)
+        order = policy.select_action(state)
+        assert order > 0

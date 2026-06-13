@@ -2,8 +2,9 @@
 
 Defines the two-method contract every replenishment policy (EOQ, OrderUpTo,
 PPO) must satisfy: ``select_action`` and ``reset``. The ``State`` dataclass is
-the common observation passed by the simulation environment; classical policies
-read named fields directly while PPO flattens it into a vector observation.
+the simulator's native per-day observation; it mirrors the PRD's PPO state
+vector so the PPO wrapper can flatten it almost directly, while classical
+policies read the named fields they need.
 """
 
 from __future__ import annotations
@@ -13,46 +14,61 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from adaptive_scm.forecasting.base import ForecastOutput
-
 
 @dataclass(frozen=True)
 class State:
     """Decision-time state passed from the simulator to a policy.
 
-    Holds everything a policy might need on a given day: current inventory,
-    outstanding orders in the pipeline, the latest forecast, day-of-week, and
-    upcoming event flags. Classical policies (EOQ, OrderUpTo) read a subset of
-    these; PPO's wrapper flattens them into its observation vector.
+    Holds the raw facts a policy needs on a given simulation day: inventory,
+    outstanding pipeline orders, the forward forecast as separate mean and
+    uncertainty vectors, calendar position, and upcoming events. The field
+    layout matches the PRD's PPO observation (Feature 7) so the PPO wrapper can
+    concatenate the fields into its vector with minimal transformation; EOQ and
+    OrderUpTo read the subset they need (inventory position and the forecast).
 
     Attributes:
         on_hand: Current physical inventory in units.
-        pipeline: Outstanding orders indexed by remaining lead time (in days).
-            ``pipeline[0]`` arrives today, ``pipeline[k]`` arrives in ``k`` days.
-        forecast: The latest ``ForecastOutput`` aligned to today as step 0.
-        day_of_week: Integer 0..6 for the current simulation day.
-        upcoming_events: Binary flags of length 7 indicating an event in each of
+        pipeline: Outstanding orders indexed by remaining lead time (days).
+            ``pipeline[k]`` arrives in ``k`` days (``pipeline[0]`` arrives today).
+        forecast_mean: Point forecast of demand for the next ``H`` days
+            (``H`` is the forecast window the simulator exposes, default 7).
+        forecast_std: Per-day forecast-error standard deviation over the same
+            window; the uncertainty signal for both PPO and classical safety stock.
+        day_of_week: One-hot vector of length 7 for the current day.
+        upcoming_events: Binary flags of length 7 marking an event on each of
             the next 7 days.
+        time_index: Integer day index within the episode (0-based).
     """
 
     on_hand: float
     pipeline: np.ndarray
-    forecast: ForecastOutput
-    day_of_week: int
+    forecast_mean: np.ndarray
+    forecast_std: np.ndarray
+    day_of_week: np.ndarray
     upcoming_events: np.ndarray
+    time_index: int
 
     @property
     def inventory_position(self) -> float:
-        """On-hand inventory plus all outstanding orders.
+        """On-hand inventory plus all outstanding pipeline orders.
 
-        Computed as ``on_hand + sum(pipeline)``. The standard reorder-point and
-        order-up-to formulas operate on inventory position rather than on-hand,
-        so this is exposed as a property for clarity.
+        Computed as ``on_hand + sum(pipeline)``. Reorder-point and order-up-to
+        formulas operate on inventory position rather than on-hand alone, so it
+        is exposed as a property.
 
         Returns:
             Total inventory position in units.
         """
         return float(self.on_hand) + float(self.pipeline.sum())
+
+    @property
+    def forecast_horizon(self) -> int:
+        """Length of the forecast window carried in the state.
+
+        Returns:
+            Number of days in ``forecast_mean`` / ``forecast_std``.
+        """
+        return int(self.forecast_mean.shape[0])
 
 
 class Policy(ABC):

@@ -129,9 +129,9 @@ class EOQPolicy(Policy):
             Mean daily demand, floored at zero to handle pathological
             negative point forecasts.
         """
-        horizon = state.forecast.horizon
+        horizon = state.forecast_horizon
         window = min(self._lead_time, horizon)
-        mean_d = float(state.forecast.point_forecast[:window].mean())
+        mean_d = float(state.forecast_mean[:window].mean())
         return max(0.0, mean_d)
 
     def _eoq(self, mean_daily_demand: float) -> float:
@@ -155,19 +155,23 @@ class EOQPolicy(Policy):
     def _reorder_point(self, state: State, mean_daily_demand: float) -> float:
         """Compute ``ROP = mean_daily_demand * L + ss``.
 
-        Safety stock ``ss = z * sigma_d * sqrt(L)`` uses the forecaster's
-        historical RMSE as a proxy for the daily forecast-error standard
-        deviation (PRD-documented interpretation: the policy specification's
-        ``sigma_L`` is read as the daily error std, so the resulting
-        ``sigma_L * sqrt(L)`` matches the textbook ``sigma_d * sqrt(L)``).
+        Safety stock ``ss = z * sigma_d * sqrt(L)`` where ``sigma_d`` is the
+        mean per-day forecast-error standard deviation over the lead-time
+        window, read from the state's ``forecast_std`` vector (D-3.1 / D-1.1:
+        ``sigma_d`` is a daily error SD, so ``sigma_d * sqrt(L)`` matches the
+        textbook safety-stock form). Sourcing it from ``forecast_std`` rather
+        than a single scalar lets the uncertainty vary by day and uses the same
+        signal PPO sees.
 
         Args:
-            state: Current state, used for ``forecast.historical_rmse``.
+            state: Current state, used for ``forecast_std`` over the lead time.
             mean_daily_demand: Mean forecasted daily demand in units.
 
         Returns:
             Reorder point in units.
         """
-        sigma_d = float(state.forecast.historical_rmse)
+        horizon = state.forecast_horizon
+        window = min(self._lead_time, horizon)
+        sigma_d = float(state.forecast_std[:window].mean())
         safety_stock = self._z * sigma_d * math.sqrt(self._lead_time)
         return mean_daily_demand * self._lead_time + safety_stock
