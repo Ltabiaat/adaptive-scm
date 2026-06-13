@@ -230,22 +230,21 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   ``accelerator: gpu`` (or ``auto``) in config for the real training runs.
 - **Change it:** Edit ``config/forecasters/tft.yaml``; it's purely config.
 
-### D-4.7 Test suite loads torch before xgboost (macOS libomp clash) 🟡
-- **What:** ``tests/conftest.py`` imports ``torch`` at the very top (before any
-  test module can import xgboost) and, on macOS only, sets
-  ``KMP_DUPLICATE_LIB_OK=TRUE`` for the test session.
-- **Why:** xgboost and torch each bundle their own OpenMP runtime; with both
-  loaded into one process — which happens only in the unit-test suite, where
-  TFT tests follow XGBoost tests — the second runtime can deadlock on macOS.
-  Observed as a silent freeze at the first TFT fit (TFT tests passed in
-  isolation in 8s on the same machine). Loading torch first makes its libomp
-  the resident runtime; the env var is the documented escape hatch for the
-  duplicate-runtime case. **Scope:** tests only. Production scripts
-  (``train_forecaster.py``, later ``train_ppo.py``) train one model per
-  process, so the clash cannot affect thesis results.
-- **Change it:** Remove the conftest block if the suite ever runs each test
-  file in its own process (e.g. pytest-xdist), or once upstream wheels share
-  a single libomp.
+### D-4.7 TFT tests run in a separate process from xgboost tests 🟡
+- **What:** TFT tests carry a ``tft`` pytest marker; ``scripts/run_tests.sh``
+  runs the suite as two pytest invocations (``-m "not tft"`` then ``-m tft``)
+  so xgboost and torch are never loaded into the same process.
+- **Why:** xgboost and torch each bundle their own OpenMP runtime (libomp).
+  On macOS, whichever loads second breaks: with xgboost first, TFT training
+  froze indefinitely; after a torch-first-import mitigation was tried, xgboost
+  segfaulted instead (``_meta_from_numpy``). The runtimes are simply
+  incompatible in one process on that platform, so load-order tricks and
+  ``KMP_DUPLICATE_LIB_OK`` were abandoned in favor of process isolation,
+  which is guaranteed (each half passes independently on the affected
+  machine). **Scope:** tests only. Production scripts train one model per
+  process and are unaffected; Linux runs both halves fine either way.
+- **Change it:** Drop the marker split once upstream wheels share a single
+  libomp, or if the suite moves to per-file process isolation (pytest-xdist).
 
 ---
 

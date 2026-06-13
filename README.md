@@ -13,7 +13,9 @@ uv sync --extra dev                           # dev tools (pytest, ruff, black)
 
 uv run python scripts/preprocess.py           # build data/processed/<item>_<store>.parquet
 
-uv run pytest tests/unit/                     # fast tests
+bash scripts/run_tests.sh                     # full unit suite (two processes, see D-4.7)
+uv run pytest tests/unit/ -m "not tft"        # everything except TFT
+uv run pytest tests/unit/ -m tft              # TFT only
 uv run ruff check src/ tests/                 # lint
 uv run black src/ tests/                      # format
 ```

@@ -391,6 +391,7 @@ def fitted_tft(tft_training_frame):
     return forecaster
 
 
+@pytest.mark.tft
 def test_tft(fitted_tft):
     """Top-level acceptance test named in PRD Feature 4 acceptance criteria.
 
@@ -415,6 +416,7 @@ def test_tft(fitted_tft):
     assert 1 <= fitted_tft.epochs_trained <= _TFT_TEST_KWARGS["max_epochs"]
 
 
+@pytest.mark.tft
 class TestTFTConstruction:
     def test_rejects_bad_quantiles(self):
         from adaptive_scm.forecasting import TFTForecaster
@@ -433,6 +435,7 @@ class TestTFTConstruction:
             TFTForecaster(encoder_length=0)
 
 
+@pytest.mark.tft
 class TestTFTInterface:
     def test_predict_before_fit_raises(self):
         from adaptive_scm.forecasting import TFTForecaster
@@ -463,6 +466,7 @@ class TestTFTInterface:
             TFTForecaster(**_TFT_TEST_KWARGS).fit(only_train)
 
 
+@pytest.mark.tft
 class TestTFTForecastContract:
     def test_quantiles_are_ordered(self, fitted_tft):
         # P10 <= P50 <= P90 after the crossing repair (D-4.2).
@@ -497,6 +501,7 @@ class TestTFTForecastContract:
         np.testing.assert_array_equal(a, b)
 
 
+@pytest.mark.tft
 class TestTFTSaveLoad:
     def test_round_trip_preserves_predictions(self, fitted_tft, tmp_path):
         from adaptive_scm.forecasting import TFTForecaster

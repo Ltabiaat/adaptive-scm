@@ -7,25 +7,7 @@ dataset so the suite stays fast and CI-friendly (per project memory).
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
-
-# -- macOS OpenMP clash mitigation (D-4.7) ---------------------------------
-# xgboost and torch each bundle their own OpenMP runtime (libomp). When both
-# load into one process -- as in this test suite, where TFT tests run after
-# XGBoost tests -- the second runtime can deadlock on macOS (observed as a
-# silent freeze at the first TFT fit). Loading torch first makes its libomp
-# the resident runtime; the env var is Intel's documented escape hatch for
-# the duplicate-runtime case, scoped to macOS test sessions only. Production
-# scripts train one model per process and are unaffected.
-if sys.platform == "darwin":
-    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-try:
-    import torch  # noqa: F401
-except ImportError:  # deep extras not installed; TFT tests will not collect
-    pass
-# ---------------------------------------------------------------------------
 
 import numpy as np
 import pandas as pd
