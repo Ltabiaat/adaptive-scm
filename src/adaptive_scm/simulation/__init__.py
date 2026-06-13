@@ -16,6 +16,11 @@ from adaptive_scm.simulation.episodes import (
     build_forecast_arrays,
     make_training_episode_factory,
 )
+from adaptive_scm.simulation.runner import (
+    ExperimentResult,
+    result_to_dataframe,
+    run_replications,
+)
 
 __all__ = [
     "InventoryEnv",
@@ -26,4 +31,7 @@ __all__ = [
     "build_forecast_arrays",
     "build_eval_episode",
     "make_training_episode_factory",
+    "run_replications",
+    "result_to_dataframe",
+    "ExperimentResult",
 ]

@@ -90,3 +90,76 @@ def test_ppo_runs_evaluation_episode(tmp_path):
         total_reward += reward
         done = term or trunc
     assert np.isfinite(total_reward)
+
+
+# --------------------------------------------------------------------------- #
+# Full-suite orchestration (Feature 11)
+# --------------------------------------------------------------------------- #
+
+
+def test_full_run(tmp_path, monkeypatch):
+    """PRD Feature 11 gate: a reduced suite runs end to end and aggregates.
+
+    Builds the minimal artifacts a suite needs (a processed series plus one
+    frozen forecaster and one PPO agent), then drives the runner across a
+    reduced set of combinations directly (not via subprocess) and renders the
+    summary report -- exercising the same code path ``run_full_suite.py`` uses.
+    """
+    import numpy as np
+
+    from adaptive_scm.evaluation import collect_summary_rows, render_summary_markdown
+    from adaptive_scm.policies import EOQPolicy, PPOAgent, PPOHyperparams
+    from adaptive_scm.simulation import (
+        EnvConfig,
+        InventoryEnv,
+        build_eval_episode,
+        make_training_episode_factory,
+        result_to_dataframe,
+        run_replications,
+    )
+
+    # Synthetic processed series.
+    rng = np.random.default_rng(0)
+    length = 400
+    days = np.arange(length)
+    sales = np.clip(10 + 3 * np.sin(2 * np.pi * days / 7) + rng.normal(0, 1, length), 1, None)
+    dow = days % 7
+    d_bar = float(sales.mean())
+    rmse = 2.0
+
+    # One trained PPO agent (tiny budget) standing in for the suite's agents.
+    train_cfg = EnvConfig(episode_length=120, mean_daily_demand=d_bar)
+    factory = make_training_episode_factory(sales, dow, rmse, 120)
+    train_env = InventoryEnv(train_cfg, factory(rng), seed=0, episode_factory=factory)
+    agent = PPOAgent(d_bar, PPOHyperparams(n_steps=128, n_epochs=2), seed=0)
+    agent.train(train_env, total_timesteps=256)
+
+    eval_cfg = EnvConfig(episode_length=28, mean_daily_demand=d_bar)
+    episode = build_eval_episode(sales, dow, rmse, 28)
+
+    # Reduced suite: 1 forecaster x {eoq, ppo} x {baseline}.
+    summaries = []
+    sim_dir = tmp_path / "simulations"
+    sim_dir.mkdir()
+    policies = {"eoq": EOQPolicy(0.05, 10.0, 3), "ppo": agent}
+    for policy_name, policy in policies.items():
+        env = InventoryEnv(eval_cfg, episode, seed=42)
+        result = run_replications(env, policy, n_replications=3, disruption_window=None)
+        result.summary["forecast_rmse"] = rmse
+        out_path = sim_dir / f"arima_{policy_name}_baseline.parquet"
+        result_to_dataframe(result).to_parquet(out_path, index=False)
+        assert out_path.exists()
+        row = {
+            **result.summary,
+            "forecaster": "arima",
+            "policy": policy_name,
+            "condition": "baseline",
+        }
+        summaries.append(row)
+
+    suite = collect_summary_rows(summaries)
+    assert len(suite) == 2
+    report = render_summary_markdown(suite)
+    (tmp_path / "summary.md").write_text(report)
+    assert "# Experimental Suite Summary" in report
+    assert "Total cost" in report

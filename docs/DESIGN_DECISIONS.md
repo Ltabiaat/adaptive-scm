@@ -398,4 +398,66 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 ---
 
-_Last updated: Phase 4 (PPO). Append new entries as later features land._
+## Phase 5 — Experiment orchestration (Features 10, 11)
+
+### D-10.1 The runner is pure: it takes a built env + policy 🟢
+- **What:** ``simulation/runner.py::run_replications(env, policy, n, seeds,
+  disruption_window)`` drives any policy through any (already-wrapped) env and
+  returns an ``ExperimentResult``. Loading forecasters, building policies, and
+  wrapping disruptions live in ``scripts/run_experiment.py``, not the runner.
+- **Why:** Keeps the runner trivially testable with classical policies and no
+  trained artifacts, and keeps artifact/config plumbing out of the hot loop.
+- **Change it:** Nothing; this separation is deliberate.
+
+### D-10.2 One Parquet per cell: daily rows + a summary row 🟢
+- **What:** ``result_to_dataframe`` writes every ``(replication, day)`` row with
+  ``record_type='daily'`` plus a single ``record_type='summary'`` row carrying
+  the aggregate metrics (PRD Feature 10 layout). Daily and summary columns
+  coexist with NaNs where not applicable.
+- **Why:** Satisfies the PRD's "one row per (replication, day) plus a summary
+  row" literally while keeping everything in one queryable file per cell.
+- **Change it:** Split into two files (daily / summary) if a single mixed table
+  is awkward for downstream analysis.
+
+### D-10.3 Resilience metrics are within-run, not cross-condition 🔴
+- **What:** ``service_level_degradation`` is the drop in mean daily service
+  during the disruption window vs the pre-window period of the *same* run.
+  ``recovery_time`` is days after the window until 3-day-smoothed service returns
+  within 0.02 of the pre-window level (else the remaining days). Baseline runs
+  (no window) report 0 for both.
+- **Why:** Self-contained per run, so resilience is defined without pairing each
+  disrupted run to a specific baseline run. Affects every resilience number, so
+  flagged.
+- **Change it:** Redefine degradation against the baseline condition's fill rate
+  in ``evaluation/metrics.py`` if a cross-condition contrast is preferred.
+
+### D-11.1 Filenames are never re-parsed for labels 🟡
+- **What:** ``run_full_suite.py`` iterates ``itertools.product(forecasters,
+  policies, conditions)`` and passes the labels explicitly to ``_summary_row``;
+  it never splits the ``{f}_{p}_{c}.parquet`` stem back into labels.
+- **Why:** Policy ``order_up_to`` and conditions ``demand_spike`` /
+  ``lead_time_disruption`` contain underscores, so ``stem.split("_")`` is
+  ambiguous and mislabels rows. Carrying labels from the loop is unambiguous.
+- **Change it:** If a standalone re-parser is ever needed, match against the
+  known policy/condition vocabularies rather than splitting on "_".
+
+### D-11.2 Full suite is resumable via existing-file skip 🟢
+- **What:** Each cell whose ``results/simulations/{f}_{p}_{c}.parquet`` already
+  exists is skipped; cells run as independent subprocesses of
+  ``run_experiment.py``.
+- **Why:** A 27-cell × 30-rep run is long; resumability lets an interrupted run
+  continue, and subprocess isolation keeps one cell's torch/xgboost state from
+  leaking into the next (relevant to the libomp split, D-4.7).
+- **Change it:** Delete a cell's Parquet to force a re-run.
+
+### D-11.3 H3 correlation guards against constant input 🟢
+- **What:** ``rmse_cost_correlation`` returns ``nan`` when fewer than 3 cells or
+  when forecast RMSE / cost is constant (e.g. a single-forecaster subset), so it
+  emits no ``ConstantInputWarning``.
+- **Why:** The real 3-forecaster suite varies RMSE, but partial runs and tests
+  may not; a clean ``nan`` is better than a runtime warning.
+- **Change it:** Nothing.
+
+---
+
+_Last updated: Phase 5 (orchestration). Append new entries as later features land._

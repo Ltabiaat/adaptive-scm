@@ -27,8 +27,9 @@ uv run black src/ tests/                      # format
 - **Phase 2 — Forecasting (Features 2, 3, 4)**: ✅ ARIMA, XGBoost, and TFT all pass the gate (`tests/unit/test_forecasting.py`).
 - **Phase 3 — Simulation core (Features 6, 7, 8)**: ✅ order-up-to policy, Gymnasium environment, disruption wrappers.
 - **Phase 4 — PPO integration (Feature 9)**: ✅ PPO agent, randomized training episodes, stochastic demand; integration gate passes.
-- Phase 5 — Experiment orchestration (Features 10, 11): not started.
-- Phase 6+ — Analysis: not started.
+- **Phase 5 — Experiment orchestration (Features 10, 11)**: ✅ multi-replication runner, metrics (cost/fill/resilience), single-experiment + full-suite CLIs, Markdown summary report.
+- Phase 6 — Analysis & hypothesis tests (Feature 12): not started.
+- Phase 7 — Full 30-replication run on M5: not started.
 
 ## Layout
 
