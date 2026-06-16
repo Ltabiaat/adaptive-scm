@@ -76,6 +76,9 @@ class EnvConfig:
         lead_time_max_additional: Max extra days drawn uniformly in [0, this].
         episode_length: Number of decision days per episode.
         mean_daily_demand: Reference demand ``d_bar`` that scales the action grid.
+        demand_noise_cv: Coefficient of variation of the multiplicative lognormal
+            demand noise (a property of the world, identical across forecasters).
+            0 makes generated demand deterministic (= the demand level rounded).
     """
 
     holding_cost: float = 0.05
@@ -86,27 +89,37 @@ class EnvConfig:
     lead_time_max_additional: int = 2
     episode_length: int = 28
     mean_daily_demand: float = 1.0
+    demand_noise_cv: float = 0.0
 
 
 @dataclass
 class EpisodeData:
-    """Per-episode ground-truth and forecast inputs.
+    """Per-episode forecast and ground-truth inputs.
 
-    Supplies the environment with the forecast the agent sees plus calendar
-    context, and optionally a fixed realized-demand series. When ``demand`` is
-    ``None`` the environment generates demand on each reset from the forecast
-    via multiplicative lognormal noise (PRD Feature 7), so replications differ
-    by their demand draws. Tests pass an explicit ``demand`` for determinism.
-    Forecast arrays must extend ``FORECAST_WINDOW`` days beyond ``episode_length``
-    so the final day still has a full forward window.
+    Separates two distinct quantities (Tier-2 demand model, D-9.7):
+
+    * ``forecast_mean`` / ``forecast_std`` -- what the *policy sees*: the
+      forecaster's point prediction and its uncertainty (RMSE). These differ by
+      forecaster and may be wrong relative to the truth.
+    * ``demand_base`` -- the *ground-truth* demand level the world follows;
+      realized demand is generated from it via multiplicative lognormal noise
+      (forecaster-independent), so a forecast can be genuinely inaccurate and
+      the policy pays for that error.
+
+    When ``demand`` is given it is used verbatim (deterministic tests/replays).
+    Otherwise demand is generated from ``demand_base`` if present, else from
+    ``forecast_mean`` (legacy fallback). Forecast arrays must extend
+    ``FORECAST_WINDOW`` days beyond ``episode_length`` for the final day's window.
 
     Attributes:
-        forecast_mean: Forecast point estimate per day, length
+        forecast_mean: Forecaster point prediction per day, length
             >= ``episode_length + FORECAST_WINDOW``.
-        forecast_std: Forecast-error SD per day, same length as ``forecast_mean``.
+        forecast_std: Forecast uncertainty (RMSE) per day, same length.
         day_of_week: Integer 0..6 per day, length >= ``episode_length``.
-        demand: Optional fixed realized demand per day, length
-            >= ``episode_length``. When ``None``, generated from the forecast.
+        demand: Optional fixed realized demand, length >= ``episode_length``.
+        demand_base: Optional ground-truth demand level, length
+            >= ``episode_length``; the basis for generated demand when ``demand``
+            is ``None``.
         events: Binary event flag per day, length
             >= ``episode_length + FORECAST_WINDOW``.
     """
@@ -115,6 +128,7 @@ class EpisodeData:
     forecast_std: np.ndarray
     day_of_week: np.ndarray
     demand: np.ndarray | None = None
+    demand_base: np.ndarray | None = None
     events: np.ndarray = field(default=None)  # type: ignore[assignment]
 
 
@@ -215,13 +229,17 @@ class InventoryEnv(gym.Env):
     def _resolve_demand(self) -> np.ndarray:
         """Return the realized demand for this episode.
 
-        Uses the episode's fixed ``demand`` array when present (deterministic
-        tests / replays); otherwise generates it from the forecast via
-        multiplicative lognormal noise (D-9.3): for each day,
-        ``demand = round(max(0, forecast_mean * LogNormal(-s^2/2, s)))`` with
-        ``s`` the per-day coefficient of variation ``forecast_std/forecast_mean``
-        (floored). The ``-s^2/2`` drift keeps the multiplier's mean at 1, so
-        demand is unbiased around the forecast.
+        Uses the fixed ``demand`` array when present (deterministic tests). Else
+        generates demand from the ground-truth ``demand_base`` (falling back to
+        ``forecast_mean`` only if no base is supplied) via multiplicative
+        lognormal noise with a single forecaster-independent coefficient of
+        variation ``demand_noise_cv`` (D-9.7): for each day,
+        ``demand = round(max(0, base * LogNormal(-s^2/2, s)))`` with ``s`` the
+        configured CV. The ``-s^2/2`` drift keeps the multiplier's mean at 1, so
+        demand is unbiased around the truth. When the CV is 0 the demand equals
+        the rounded base. Crucially the noise does not depend on the forecaster,
+        so every forecaster faces the same demand at a given seed -- forecast
+        quality enters only through what the policy sees, not through the world.
 
         Returns:
             Realized demand array of length ``episode_length``.
@@ -230,13 +248,16 @@ class InventoryEnv(gym.Env):
         if self._episode.demand is not None:
             return np.array(self._episode.demand[:n], dtype=float)  # copy, not view
 
-        mean = np.asarray(self._episode.forecast_mean[:n], dtype=float)
-        std = np.asarray(self._episode.forecast_std[:n], dtype=float)
-        cv = np.where(mean > 1e-9, std / np.maximum(mean, 1e-9), 0.0)
-        cv = np.clip(cv, 0.0, 2.0)
-        noise = self._rng.lognormal(mean=-(cv**2) / 2.0, sigma=cv)
-        demand = np.clip(mean * noise, 0.0, None)
-        return np.round(demand)
+        base = self._episode.demand_base
+        if base is None:
+            base = self._episode.forecast_mean
+        base = np.asarray(base[:n], dtype=float)
+
+        cv = float(self._cfg.demand_noise_cv)
+        if cv <= 0.0:
+            return np.round(np.clip(base, 0.0, None))
+        noise = self._rng.lognormal(mean=-(cv**2) / 2.0, sigma=cv, size=n)
+        return np.round(np.clip(base * noise, 0.0, None))
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         """Advance one day: place an order, receive arrivals, meet demand, cost.

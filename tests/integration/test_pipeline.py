@@ -134,8 +134,8 @@ def test_full_run(tmp_path, monkeypatch):
     agent = PPOAgent(d_bar, PPOHyperparams(n_steps=128, n_epochs=2), seed=0)
     agent.train(train_env, total_timesteps=256)
 
-    eval_cfg = EnvConfig(episode_length=28, mean_daily_demand=d_bar)
-    episode = build_eval_episode(sales, dow, rmse, 28)
+    eval_cfg = EnvConfig(episode_length=28, mean_daily_demand=d_bar, demand_noise_cv=0.25)
+    episode = build_eval_episode(sales[-28:], sales[-28:], dow[-28:], rmse, 28)
 
     # Reduced suite: 1 forecaster x {eoq, ppo} x {baseline}.
     summaries = []

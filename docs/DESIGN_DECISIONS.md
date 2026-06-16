@@ -505,6 +505,35 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 - **Change it:** Adjust the magnitude cutoff or drop the OR clause in
   ``test_h3`` to require strict non-significance.
 
+### D-9.7 Tier-2 demand model: forecast separated from ground truth 🔴 (supersedes D-9.5)
+- **What:** The forecast the policy sees and the demand it faces are now distinct.
+  ``EpisodeData`` carries ``forecast_mean`` / ``forecast_std`` (the forecaster's
+  prediction and RMSE) **and** ``demand_base`` (the ground-truth demand level).
+  Realized demand is generated from ``demand_base`` via multiplicative lognormal
+  noise with a single **forecaster-independent** coefficient of variation
+  (``EnvConfig.demand_noise_cv``, from ``config.simulation.noise.demand_cv``).
+  At evaluation, ``forecast_mean`` is the forecaster's **actual** ``predict()``
+  output and ``demand_base`` is the realized M5 test sales; at training,
+  ``forecast_mean`` is a synthetic forecast (truth + per-day ``N(0, rmse)``) so
+  the agent learns on forecasts of that forecaster's error scale.
+- **Why:** Under the old model (D-9.5) demand was generated *from* the forecast,
+  so a forecast could never be wrong and the three forecasters collapsed to their
+  RMSE. Separating them means forecast error (bias **and** variance) genuinely
+  drives cost, the forecasters are used in full (their whole prediction
+  trajectory), and H3 tests forecast accuracy the way Theodorou et al. (2025) do.
+  Making the demand noise forecaster-independent also means every forecaster
+  faces the *same* demand at a given seed, so cross-forecaster comparisons (H2/H3)
+  are cleanly paired. Validated: holding truth and seed fixed, a biased forecast
+  changes fill rate and cost (under-forecasting −40% dropped fill rate 0.71→0.51).
+- **Supersedes:** D-9.3 (demand was generated from ``forecast_mean`` with a
+  per-day CV = ``forecast_std/forecast_mean``) and D-9.5 (forecast signal was the
+  realized sales level, forecaster contributing only its RMSE).
+- **Change it:** ``demand_noise_cv`` is a modeling parameter (default 0.25);
+  it represents irreducible demand uncertainty for replication variation and is a
+  natural target for a sensitivity check. Set it to 0 for deterministic demand.
+  For full rigor one could replace the synthetic training forecast with true
+  rolling-origin forecasts (Tier 3), at much higher cost.
+
 ---
 
-_Last updated: Phase 6 (analysis). Append new entries as later features land._
+_Last updated: Tier-2 demand-model refactor. Append new entries as later features land._

@@ -83,6 +83,7 @@ def _env_config(cfg, training: bool) -> EnvConfig:
         lead_time_max_additional=s.lead_time.stochastic_max_additional,
         episode_length=length,
         mean_daily_demand=1.0,  # overwritten below from the series
+        demand_noise_cv=s.noise.demand_cv,
     )
 
 

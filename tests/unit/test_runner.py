@@ -33,8 +33,12 @@ def _series(length: int = 200):
 def _env(episode_len: int = _EPISODE_LEN, seed: int = 0):
     sales, dow = _series()
     d_bar = float(sales.mean())
-    cfg = EnvConfig(episode_length=episode_len, mean_daily_demand=d_bar)
-    episode = build_eval_episode(sales, dow, historical_rmse=2.0, episode_length=episode_len)
+    cfg = EnvConfig(episode_length=episode_len, mean_daily_demand=d_bar, demand_noise_cv=0.25)
+    # Tier-2: prediction (policy's view) and realized truth are separate; here a
+    # near-perfect synthetic prediction over the last window suffices for tests.
+    prediction = sales[-episode_len:]
+    realized = sales[-episode_len:]
+    episode = build_eval_episode(prediction, realized, dow[-episode_len:], 2.0, episode_len)
     return InventoryEnv(cfg, episode, seed=seed)
 
 

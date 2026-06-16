@@ -26,6 +26,7 @@ simulation:
     training_length: 365
   noise:
     distribution: lognormal
+    demand_cv: 0.25          # CV of multiplicative demand noise (world property)
 
 experiments:
   conditions:

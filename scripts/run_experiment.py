@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+import numpy as np
 import pandas as pd
 from omegaconf import OmegaConf
 
@@ -81,6 +82,7 @@ def build_env_config(cfg, mean_daily_demand: float) -> EnvConfig:
         lead_time_max_additional=s.lead_time.stochastic_max_additional,
         episode_length=s.episode.length,
         mean_daily_demand=mean_daily_demand,
+        demand_noise_cv=s.noise.demand_cv,
     )
 
 
@@ -206,15 +208,23 @@ def main(
     if not processed.exists():
         raise FileNotFoundError(f"processed data not found at {processed}")
     df = pd.read_parquet(processed)
-    sales = df["sales"].to_numpy(dtype=float)
-    dow = pd.to_datetime(df["date"]).dt.dayofweek.to_numpy()
+    dow_all = pd.to_datetime(df["date"]).dt.dayofweek.to_numpy()
     d_bar = float(df[df["split"] == "train"]["sales"].mean())
 
     frozen = load_frozen_forecaster(forecaster)
     rmse = float(frozen.historical_rmse)
 
     env_cfg = build_env_config(cfg, d_bar)
-    episode = build_eval_episode(sales, dow, rmse, env_cfg.episode_length)
+    horizon = env_cfg.episode_length
+
+    # The forecast the policy sees is the forecaster's actual prediction for the
+    # test window; the ground truth is the realized test-split sales (D-9.7).
+    prediction = np.asarray(frozen.predict(horizon).point_forecast, dtype=float)
+    test_df = df[df["split"] == "test"].head(horizon)
+    realized = test_df["sales"].to_numpy(dtype=float)
+    test_dow = dow_all[df["split"].to_numpy() == "test"][:horizon]
+
+    episode = build_eval_episode(prediction, realized, test_dow, rmse, horizon)
     pol = build_policy(policy, cfg, env_cfg, forecaster)
 
     base_env = InventoryEnv(env_cfg, episode, seed=seed)

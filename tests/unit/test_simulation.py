@@ -253,3 +253,71 @@ class TestDisruptions:
     def test_lead_time_disruption_rejects_multiplier_below_one(self):
         with pytest.raises(ValueError, match="multiplier"):
             LeadTimeDisruptionWrapper(InventoryEnv(_config(), _episode(), seed=1), multiplier=0.5)
+
+
+class TestTier2DemandModel:
+    """Forecast (policy's view) is separate from ground-truth demand (D-9.7)."""
+
+    def test_demand_generated_from_base_not_forecast(self):
+        # Forecast says 5/day, truth is 20/day: demand should track the truth.
+        cfg = _config(demand_noise_cv=0.0)  # deterministic: demand == base
+        ep = EpisodeData(
+            forecast_mean=np.full(_N + _W, 5.0),
+            forecast_std=np.full(_N + _W, 2.0),
+            day_of_week=np.arange(_N) % 7,
+            demand_base=np.full(_N, 20.0),
+            events=np.zeros(_N + _W),
+        )
+        env = InventoryEnv(cfg, ep, seed=1)
+        env.reset(seed=1)
+        # realized demand follows the truth (20), not the forecast (5).
+        assert env.unwrapped._demand[0] == pytest.approx(20.0)
+
+    def test_demand_noise_is_forecaster_independent(self):
+        # Same truth + same seed but different forecasts -> identical demand,
+        # because demand noise depends only on the world, not the forecast.
+        base = np.full(_N, 12.0)
+        common = dict(
+            forecast_std=np.full(_N + _W, 2.0),
+            day_of_week=np.arange(_N) % 7,
+            demand_base=base,
+            events=np.zeros(_N + _W),
+        )
+        cfg = _config(demand_noise_cv=0.3)
+        ep_a = EpisodeData(forecast_mean=np.full(_N + _W, 8.0), **common)
+        ep_b = EpisodeData(forecast_mean=np.full(_N + _W, 50.0), **common)
+        env_a = InventoryEnv(cfg, ep_a, seed=7)
+        env_b = InventoryEnv(cfg, ep_b, seed=7)
+        env_a.reset(seed=7)
+        env_b.reset(seed=7)
+        assert np.array_equal(env_a.unwrapped._demand, env_b.unwrapped._demand)
+
+    def test_zero_cv_makes_demand_deterministic(self):
+        cfg = _config(demand_noise_cv=0.0)
+        ep = EpisodeData(
+            forecast_mean=np.full(_N + _W, 10.0),
+            forecast_std=np.full(_N + _W, 2.0),
+            day_of_week=np.arange(_N) % 7,
+            demand_base=np.full(_N, 10.0),
+            events=np.zeros(_N + _W),
+        )
+        env = InventoryEnv(cfg, ep, seed=1)
+        env.reset(seed=1)
+        d1 = env.unwrapped._demand.copy()
+        env.reset(seed=999)
+        assert np.array_equal(d1, env.unwrapped._demand)
+
+    def test_positive_cv_makes_demand_vary_by_seed(self):
+        cfg = _config(demand_noise_cv=0.3)
+        ep = EpisodeData(
+            forecast_mean=np.full(_N + _W, 10.0),
+            forecast_std=np.full(_N + _W, 2.0),
+            day_of_week=np.arange(_N) % 7,
+            demand_base=np.full(_N, 10.0),
+            events=np.zeros(_N + _W),
+        )
+        env = InventoryEnv(cfg, ep, seed=1)
+        env.reset(seed=1)
+        d1 = env.unwrapped._demand.copy()
+        env.reset(seed=2)
+        assert not np.array_equal(d1, env.unwrapped._demand)
