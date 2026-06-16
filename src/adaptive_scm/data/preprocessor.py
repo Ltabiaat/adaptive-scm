@@ -52,7 +52,8 @@ def split_by_position(
     Assigns the last ``test_days`` rows to ``"test"``, the ``val_days`` rows
     immediately before them to ``"val"``, and the preceding ``train_days`` rows
     to ``"train"``. Any earlier rows are dropped. Used by :func:`preprocess` to
-    produce the canonical 1597/28/28 split from the PRD.
+    produce the canonical 1520/28/28 split (28-day test matches the M5 horizon;
+    1520 = 1941 raw days - 365 lag-feature warmup - 28 val - 28 test).
 
     Args:
         df: DataFrame sorted ascending by date.
@@ -87,7 +88,7 @@ def preprocess(
     processed_dir: Path | str,
     item_id: str,
     store_id: str,
-    train_days: int = 1597,
+    train_days: int = 1520,
     val_days: int = 28,
     test_days: int = 28,
 ) -> Path:

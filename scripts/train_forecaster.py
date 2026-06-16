@@ -17,7 +17,7 @@ import click
 import pandas as pd
 from omegaconf import OmegaConf
 
-from adaptive_scm.forecasting import ARIMAForecaster, TFTForecaster, XGBoostForecaster
+from adaptive_scm.forecasting import Forecaster
 from adaptive_scm.utils.logging import get_logger
 from adaptive_scm.utils.seeding import set_global_seed
 
@@ -26,7 +26,7 @@ _LOG = get_logger(__name__)
 _RESULTS_DIR = Path("results")
 
 
-def _build_arima(cfg) -> ARIMAForecaster:
+def _build_arima(cfg) -> Forecaster:
     """Construct an :class:`ARIMAForecaster` from the merged config.
 
     Reads the ``forecasters.arima`` block (with ``.get`` fallbacks for the
@@ -40,6 +40,8 @@ def _build_arima(cfg) -> ARIMAForecaster:
         An unfitted :class:`ARIMAForecaster`.
     """
     a = cfg.forecasters.arima
+    from adaptive_scm.forecasting.arima import ARIMAForecaster
+
     return ARIMAForecaster(
         seasonal=a.seasonal,
         seasonal_period=a.seasonal_period,
@@ -54,7 +56,7 @@ def _build_arima(cfg) -> ARIMAForecaster:
     )
 
 
-def _build_xgboost(cfg) -> XGBoostForecaster:
+def _build_xgboost(cfg) -> Forecaster:
     """Construct an :class:`XGBoostForecaster` from the merged config.
 
     Reads the ``forecasters.xgboost`` block, translating the YAML grid lists
@@ -68,6 +70,8 @@ def _build_xgboost(cfg) -> XGBoostForecaster:
         An unfitted :class:`XGBoostForecaster`.
     """
     x = cfg.forecasters.xgboost
+    from adaptive_scm.forecasting.xgboost import XGBoostForecaster
+
     grid = {
         "max_depth": tuple(x.grid_search.max_depth),
         "learning_rate": tuple(x.grid_search.learning_rate),
@@ -80,7 +84,7 @@ def _build_xgboost(cfg) -> XGBoostForecaster:
     )
 
 
-def _build_tft(cfg) -> TFTForecaster:
+def _build_tft(cfg) -> Forecaster:
     """Construct a :class:`TFTForecaster` from the merged config.
 
     Reads the ``forecasters.tft`` block. ``encoder_length`` falls back to 56
@@ -94,6 +98,8 @@ def _build_tft(cfg) -> TFTForecaster:
         An unfitted :class:`TFTForecaster`.
     """
     t = cfg.forecasters.tft
+    from adaptive_scm.forecasting.tft import TFTForecaster
+
     return TFTForecaster(
         learning_rate=t.learning_rate,
         batch_size=t.batch_size,

@@ -49,16 +49,22 @@ def load_frozen_forecaster(name: str):
     Raises:
         FileNotFoundError: If the artifact is missing.
     """
-    from adaptive_scm.forecasting import ARIMAForecaster, TFTForecaster, XGBoostForecaster
-
-    loaders = {
-        "arima": (ARIMAForecaster, _RESULTS_DIR / "forecaster_arima.joblib"),
-        "xgboost": (XGBoostForecaster, _RESULTS_DIR / "forecaster_xgboost.joblib"),
-        "tft": (TFTForecaster, _RESULTS_DIR / "forecaster_tft"),
+    paths = {
+        "arima": _RESULTS_DIR / "forecaster_arima.joblib",
+        "xgboost": _RESULTS_DIR / "forecaster_xgboost.joblib",
+        "tft": _RESULTS_DIR / "forecaster_tft",
     }
-    cls, path = loaders[name]
+    path = paths[name]
     if not path.exists():
         raise FileNotFoundError(f"forecaster {name!r} not found at {path}; train it first")
+    # Import only the requested forecaster's module so a single-framework run
+    # never loads the others' backend (avoids the macOS OpenMP clash, D-4.7).
+    if name == "arima":
+        from adaptive_scm.forecasting.arima import ARIMAForecaster as cls
+    elif name == "xgboost":
+        from adaptive_scm.forecasting.xgboost import XGBoostForecaster as cls
+    else:
+        from adaptive_scm.forecasting.tft import TFTForecaster as cls
     return cls.load(path)
 
 

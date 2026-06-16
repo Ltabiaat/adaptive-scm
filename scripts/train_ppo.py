@@ -12,16 +12,26 @@ Usage:
 
 from __future__ import annotations
 
-from pathlib import Path
+from adaptive_scm.utils.openmp import allow_duplicate_openmp
 
-import click
-import pandas as pd
-from omegaconf import OmegaConf
+# Training PPO on a frozen XGBoost forecaster loads both XGBoost and torch in one
+# process; permit OpenMP coexistence on macOS before either is imported (D-4.7).
+allow_duplicate_openmp()
 
-from adaptive_scm.policies import PPOAgent, PPOHyperparams
-from adaptive_scm.simulation import EnvConfig, InventoryEnv, make_training_episode_factory
-from adaptive_scm.utils.logging import get_logger
-from adaptive_scm.utils.seeding import set_global_seed
+from pathlib import Path  # noqa: E402
+
+import click  # noqa: E402
+import pandas as pd  # noqa: E402
+from omegaconf import OmegaConf  # noqa: E402
+
+from adaptive_scm.policies import PPOAgent, PPOHyperparams  # noqa: E402
+from adaptive_scm.simulation import (
+    EnvConfig,
+    InventoryEnv,
+    make_training_episode_factory,
+)  # noqa: E402
+from adaptive_scm.utils.logging import get_logger  # noqa: E402
+from adaptive_scm.utils.seeding import set_global_seed  # noqa: E402
 
 _LOG = get_logger(__name__)
 _RESULTS_DIR = Path("results")
@@ -43,19 +53,25 @@ def _load_forecaster(name: str):
     Raises:
         FileNotFoundError: If the artifact does not exist.
     """
-    from adaptive_scm.forecasting import ARIMAForecaster, TFTForecaster, XGBoostForecaster
-
-    loaders = {
-        "arima": (ARIMAForecaster, _RESULTS_DIR / "forecaster_arima.joblib"),
-        "xgboost": (XGBoostForecaster, _RESULTS_DIR / "forecaster_xgboost.joblib"),
-        "tft": (TFTForecaster, _RESULTS_DIR / "forecaster_tft"),
+    paths = {
+        "arima": _RESULTS_DIR / "forecaster_arima.joblib",
+        "xgboost": _RESULTS_DIR / "forecaster_xgboost.joblib",
+        "tft": _RESULTS_DIR / "forecaster_tft",
     }
-    cls, path = loaders[name]
+    path = paths[name]
     if not path.exists():
         raise FileNotFoundError(
             f"frozen forecaster not found at {path}; train it first with "
             f"scripts/train_forecaster.py --model={name}"
         )
+    # Import only the requested forecaster's module (D-4.7: avoid loading both
+    # XGBoost and torch into one process on macOS).
+    if name == "arima":
+        from adaptive_scm.forecasting.arima import ARIMAForecaster as cls
+    elif name == "xgboost":
+        from adaptive_scm.forecasting.xgboost import XGBoostForecaster as cls
+    else:
+        from adaptive_scm.forecasting.tft import TFTForecaster as cls
     return cls.load(path)
 
 

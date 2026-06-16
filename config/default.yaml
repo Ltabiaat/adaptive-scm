@@ -5,10 +5,12 @@ data:
   raw_dir: data/raw
   processed_dir: data/processed
   product_store:
-    item_id: FOODS_3_090
+    item_id: FOODS_3_694
     store_id: CA_1
   splits:
-    train_days: 1597
+    # 1941 M5 days - 365 (longest-lag feature warmup, dropped) = 1576 usable;
+    # 1576 - 28 val - 28 test = 1520 train. Test is the genuine last 28 days.
+    train_days: 1520
     val_days: 28
     test_days: 28
 

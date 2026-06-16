@@ -576,5 +576,40 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 - **Change it:** Pass ``device="cuda"`` explicitly to force GPU, or set MPS support
   here if a future Torch/pytorch-forecasting fixes the TFT gaps.
 
-_Last updated: device resolution (M2 readiness). Append new entries as later features land._
+### D-1.2 Train split is 1520, not 1597 (lag-365 warmup) 🔴
+- **What:** ``config.data.splits.train_days`` is 1520 (was 1597). The split is
+  1520 train / 28 val / 28 test = 1576, taken as the last 1576 usable rows so the
+  28-day test window is the genuine final 28 days of the series (M5 horizon).
+- **Why:** The PRD's 1597 did not budget for the feature warmup. The longest lag
+  feature (t-365) makes feature engineering drop the first 365 rows, so a 1941-day
+  M5 series yields only 1941 - 365 = 1576 usable days. 1597 + 28 + 28 = 1653 > 1576,
+  which crashes ``split_by_position``. Correct train size = 1576 - 28 - 28 = 1520.
+  This holds for every M5 product-store pair (all are 1941 days) and the fixed
+  feature set, so 1520 is stable across product choices.
+- **Results-affecting:** training set is 1520 days (~4.16 yr), still well past the
+  4-year gate. Surfaced on the first real-data preprocess (item FOODS_3_694, CA_1).
+- **Writing:** Chapter 3 Section 3.2 says "The first 1,597 days are used for
+  training" -> change to 1,520 (val/test 28/28 unchanged).
+
+### D-4.8 Lazy forecaster imports prevent the macOS OpenMP segfault in scripts 🔴
+- **What:** ``forecasting/__init__`` now lazy-loads each forecaster (PEP 562
+  ``__getattr__``) instead of importing all three eagerly. The training and
+  experiment scripts import only the forecaster they need (from its submodule),
+  so a single-framework run never loads the others' backend. ``run_full_suite``
+  already isolates each cell in a subprocess, so it is safe too. The one
+  unavoidable mixed process -- ``train_ppo --forecaster=xgboost`` (frozen XGBoost
+  + SB3/torch) -- calls ``utils.openmp.allow_duplicate_openmp`` first, which sets
+  ``KMP_DUPLICATE_LIB_OK=TRUE`` on macOS only.
+- **Why:** The scripts imported all three forecasters at module top, so asking to
+  train XGBoost also imported the TFT forecaster -> torch. XGBoost and torch each
+  bundle an OpenMP runtime; on macOS both in one process segfaults (exit 139) when
+  XGBoost starts its threads. Surfaced on the M2 during ``train_forecaster
+  --model=xgboost``. Linux shares one OpenMP runtime, so this never appeared in CI.
+- **Change it:** ``allow_duplicate_openmp`` is macOS-only and a no-op elsewhere
+  (Linux/Colab unaffected). Remove it if a future XGBoost/torch ships a shared
+  OpenMP on macOS.
+
+_Last updated: macOS OpenMP / lazy-import fix. Append new entries as later features land._
+
+
 

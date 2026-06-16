@@ -2,7 +2,7 @@
 
 Covers loader (filter + join + ffill), validator (all three gates), feature
 engineer (lags + rolling + calendar + events + price), splitter (positional
-1597/28/28), and the top-level ``preprocess`` orchestrator. Uses the
+1520/28/28), and the top-level ``preprocess`` orchestrator. Uses the
 synthetic M5 fixture from ``conftest.py`` — no dependency on the real M5
 dataset (per project memory).
 """
