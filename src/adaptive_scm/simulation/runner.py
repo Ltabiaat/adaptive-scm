@@ -42,24 +42,22 @@ def run_replications(
     policy: Policy,
     n_replications: int,
     seeds: list[int] | None = None,
-    disruption_window: tuple[int, int] | None = None,
 ) -> ExperimentResult:
     """Run ``n_replications`` episodes of ``policy`` in ``env`` and collect metrics.
 
     Each replication resets the policy and the environment with a distinct seed,
     steps through one full episode collecting the env's per-day ``info`` plus
-    reward, then computes that replication's metrics. Per-replication metrics are
-    aggregated into the summary. The same call works for any policy and any
-    (already-wrapped) environment, so disruption conditions are handled entirely
-    by the caller's choice of ``env`` and ``disruption_window``.
+    reward, then computes that replication's cost/service metrics. Per-replication
+    metrics are aggregated into the summary. The same call works for any policy
+    and any (already-wrapped) environment; the disruption condition is handled
+    entirely by the caller's choice of ``env``. Resilience metrics are computed
+    later at the suite level (cross-condition), not here.
 
     Args:
         env: A Gymnasium inventory environment, optionally disruption-wrapped.
         policy: The policy to evaluate.
         n_replications: Number of replications to run.
         seeds: Optional explicit per-replication seeds; defaults to ``0..N-1``.
-        disruption_window: Optional ``(start, end)`` passed to the resilience
-            metrics; ``None`` for baseline.
 
     Returns:
         An :class:`ExperimentResult`.
@@ -80,7 +78,7 @@ def run_replications(
 
     for rep, seed in enumerate(seeds):
         records = _run_one_episode(env, policy, seed)
-        per_rep.append(compute_episode_metrics(records, disruption_window))
+        per_rep.append(compute_episode_metrics(records))
         frame = pd.DataFrame(records)
         frame.insert(0, "day", range(len(frame)))
         frame.insert(0, "replication", rep)

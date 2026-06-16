@@ -419,17 +419,31 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 - **Change it:** Split into two files (daily / summary) if a single mixed table
   is awkward for downstream analysis.
 
-### D-10.3 Resilience metrics are within-run, not cross-condition 🔴
-- **What:** ``service_level_degradation`` is the drop in mean daily service
-  during the disruption window vs the pre-window period of the *same* run.
-  ``recovery_time`` is days after the window until 3-day-smoothed service returns
-  within 0.02 of the pre-window level (else the remaining days). Baseline runs
-  (no window) report 0 for both.
-- **Why:** Self-contained per run, so resilience is defined without pairing each
-  disrupted run to a specific baseline run. Affects every resilience number, so
-  flagged.
-- **Change it:** Redefine degradation against the baseline condition's fill rate
-  in ``evaluation/metrics.py`` if a cross-condition contrast is preferred.
+### D-10.3 Resilience metrics are cross-condition (matches Chapter 3 Sec 3.7) 🔴 (revised)
+- **What:** Service-level degradation and recovery time are computed *between*
+  conditions, in ``evaluation/resilience.py`` at the suite level, not per run:
+  - **degradation** = ``baseline_fill_rate - disruption_fill_rate`` (clamped at
+    0), the absolute drop in mean fill rate from the baseline condition to the
+    disruption condition.
+  - **recovery_time** = days after the disruption window ends until the
+    3-day-smoothed, replication-averaged daily service first returns within
+    ``RECOVERY_TOLERANCE`` (1 pp) of the *baseline* fill rate; else the remaining
+    days.
+  ``compute_episode_metrics`` no longer takes ``disruption_window`` and no longer
+  emits resilience keys; ``run_replications`` dropped its ``disruption_window``
+  argument. ``run_full_suite`` pairs each disruption cell with its baseline cell
+  and injects ``service_level_degradation_mean`` / ``recovery_time_mean``.
+- **Why:** The original within-run definition (pre-window vs in-window of a single
+  run) was confounded by a short, noisy 7-day pre-window reference and did not
+  match Section 3.7. The cross-condition definition is the standard supply-chain
+  resilience measure, is what the chapter specifies, and is cleaner to compute
+  (baseline and disruption fill rates already exist in the cell summaries; only
+  recovery needs the daily trajectory). Validated live: demand spike degraded
+  fill 0.740 -> 0.604 (degradation 0.136), a clean baseline-vs-disruption drop.
+- **Supersedes:** the earlier within-run definition of D-10.3.
+- **Change it:** ``RECOVERY_TOLERANCE`` (1 pp) and ``RECOVERY_SMOOTHING`` (3 days)
+  are module constants in ``resilience.py``; loosen the tolerance if 28-day runs
+  read "never recovers" too often.
 
 ### D-11.1 Filenames are never re-parsed for labels 🟡
 - **What:** ``run_full_suite.py`` iterates ``itertools.product(forecasters,

@@ -228,10 +228,10 @@ def main(
     pol = build_policy(policy, cfg, env_cfg, forecaster)
 
     base_env = InventoryEnv(env_cfg, episode, seed=seed)
-    env, window = wrap_condition(base_env, condition, cfg)
+    env, _window = wrap_condition(base_env, condition, cfg)
     seeds = [seed + r for r in range(replications)]
 
-    result = run_replications(env, pol, replications, seeds=seeds, disruption_window=window)
+    result = run_replications(env, pol, replications, seeds=seeds)
     result.summary["forecast_rmse"] = rmse
 
     _SIM_DIR.mkdir(parents=True, exist_ok=True)

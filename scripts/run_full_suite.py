@@ -23,6 +23,7 @@ import pandas as pd
 from omegaconf import OmegaConf
 
 from adaptive_scm.evaluation import collect_summary_rows, render_summary_markdown
+from adaptive_scm.evaluation.resilience import compute_resilience
 from adaptive_scm.utils.logging import get_logger
 
 _LOG = get_logger(__name__)
@@ -55,6 +56,55 @@ def _summary_row(path: Path, forecaster: str, policy: str, condition: str) -> di
     summary = {k: v for k, v in summary.items() if pd.notna(v) and k != "record_type"}
     summary.update(forecaster=forecaster, policy=policy, condition=condition)
     return summary
+
+
+def _add_resilience(suite: pd.DataFrame, config_path: Path) -> pd.DataFrame:
+    """Attach cross-condition resilience metrics to the suite table.
+
+    For each disruption cell, pairs it with the matching baseline cell (same
+    forecaster and policy) and computes service-level degradation (baseline fill
+    minus disruption fill) and recovery time from the disruption cell's daily
+    trajectory, per Chapter 3 Section 3.7. Baseline rows get zeros. Adds the
+    ``service_level_degradation_mean`` and ``recovery_time_mean`` columns the
+    summary report pivots.
+
+    Args:
+        suite: The collected suite summary table.
+        config_path: Config path (for the disruption window).
+
+    Returns:
+        The suite table with resilience columns added.
+    """
+    cfg = OmegaConf.load(config_path)
+    w = cfg.experiments.disruption_window
+    window = (w.start_day, w.start_day + w.duration_days)
+
+    fill_by_cell = {
+        (r["forecaster"], r["policy"], r["condition"]): r["fill_rate_mean"]
+        for _, r in suite.iterrows()
+    }
+
+    degradation, recovery = [], []
+    for _, row in suite.iterrows():
+        forecaster, policy, condition = row["forecaster"], row["policy"], row["condition"]
+        if condition == "baseline":
+            degradation.append(0.0)
+            recovery.append(0.0)
+            continue
+        baseline_fill = fill_by_cell.get((forecaster, policy, "baseline"))
+        if baseline_fill is None:
+            degradation.append(float("nan"))
+            recovery.append(float("nan"))
+            continue
+        daily = pd.read_parquet(_SIM_DIR / f"{forecaster}_{policy}_{condition}.parquet")
+        res = compute_resilience(daily, baseline_fill, row["fill_rate_mean"], window)
+        degradation.append(res["service_level_degradation"])
+        recovery.append(res["recovery_time"])
+
+    suite = suite.copy()
+    suite["service_level_degradation_mean"] = degradation
+    suite["recovery_time_mean"] = recovery
+    return suite
 
 
 @click.command()
@@ -107,6 +157,7 @@ def main(replications: int, config_path: Path, seed: int) -> None:
         summaries.append(_summary_row(out_path, forecaster, policy, condition))
 
     suite = collect_summary_rows(summaries)
+    suite = _add_resilience(suite, config_path)
     suite_path = _ANALYSIS_DIR / "full_suite.parquet"
     suite.to_parquet(suite_path, index=False)
 

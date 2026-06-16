@@ -23,10 +23,13 @@ from adaptive_scm.evaluation.metrics import (
     aggregate_metrics,
     compute_episode_metrics,
 )
+from adaptive_scm.evaluation.resilience import compute_resilience, mean_daily_service
 
 __all__ = [
     "compute_episode_metrics",
     "aggregate_metrics",
+    "compute_resilience",
+    "mean_daily_service",
     "collect_summary_rows",
     "rmse_cost_correlation",
     "render_summary_markdown",

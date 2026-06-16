@@ -93,11 +93,14 @@ class TestRunReplications:
 
 
 class TestDisruptionRun:
-    def test_resilience_metrics_present_under_disruption(self):
-        env = DemandSpikeWrapper(_env(), multiplier=1.5, start_day=7, duration=14)
-        result = run_replications(env, _eoq(), n_replications=3, disruption_window=(7, 21))
-        assert "service_level_degradation_mean" in result.summary
-        assert result.summary["recovery_time_mean"] >= 0.0
+    def test_disruption_run_completes_and_lowers_fill(self):
+        # A demand spike should reduce fill rate vs baseline; resilience metrics
+        # are computed cross-condition at the suite level, not in this summary.
+        baseline = run_replications(_env(seed=1), _eoq(), n_replications=3, seeds=[1, 2, 3])
+        spiked_env = DemandSpikeWrapper(_env(seed=1), multiplier=1.5, start_day=7, duration=14)
+        spiked = run_replications(spiked_env, _eoq(), n_replications=3, seeds=[1, 2, 3])
+        assert "service_level_degradation_mean" not in spiked.summary
+        assert spiked.summary["fill_rate_mean"] <= baseline.summary["fill_rate_mean"] + 1e-9
 
 
 class TestResultToDataFrame:

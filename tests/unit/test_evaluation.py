@@ -15,6 +15,7 @@ from adaptive_scm.evaluation import (
     aggregate_metrics,
     collect_summary_rows,
     compute_episode_metrics,
+    compute_resilience,
     render_summary_markdown,
     rmse_cost_correlation,
 )
@@ -71,41 +72,73 @@ class TestEpisodeMetrics:
         m = compute_episode_metrics(records)
         assert m["fill_rate"] == pytest.approx(1.0)
 
-    def test_baseline_has_no_resilience_penalty(self):
+    def test_no_resilience_keys_in_episode_metrics(self):
+        # Resilience is now cross-condition (computed at suite level), so the
+        # per-episode metrics no longer carry degradation/recovery.
         records = [_record(10, 2, stockout=4.0) for _ in range(28)]
-        m = compute_episode_metrics(records, disruption_window=None)
-        assert m["service_level_degradation"] == 0.0
-        assert m["recovery_time"] == 0.0
+        m = compute_episode_metrics(records)
+        assert "service_level_degradation" not in m
+        assert "recovery_time" not in m
 
 
 class TestResilience:
-    def test_degradation_detected_in_window(self):
-        # Full service before/after, heavy loss inside the window.
-        records = []
-        for t in range(28):
-            if 7 <= t < 21:
-                records.append(_record(10, 8))  # 20% service inside window
-            else:
-                records.append(_record(10, 0))  # full service outside
-        m = compute_episode_metrics(records, disruption_window=(7, 21))
-        # pre-window service ~1.0, in-window ~0.2 -> degradation ~0.8.
-        assert m["service_level_degradation"] == pytest.approx(0.8, abs=0.05)
+    """Cross-condition resilience (matches Chapter 3 Section 3.7)."""
 
-    def test_recovery_time_zero_when_immediate(self):
-        # Service fully restored the day the window ends.
-        records = []
-        for t in range(28):
-            records.append(_record(10, 8 if 7 <= t < 21 else 0))
-        m = compute_episode_metrics(records, disruption_window=(7, 21))
-        assert m["recovery_time"] == pytest.approx(0.0, abs=1.0)
+    def _daily(self, lost_by_day, demand=10.0):
+        # Build a one-replication daily frame from a per-day lost-sales list.
+        rows = []
+        for day, lost in enumerate(lost_by_day):
+            rows.append(
+                {
+                    "record_type": "daily",
+                    "replication": 0,
+                    "day": day,
+                    "demand": demand,
+                    "lost_sales": lost,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def test_degradation_is_cross_condition_fill_drop(self):
+        daily = self._daily([0] * 28)
+        res = compute_resilience(
+            daily, baseline_fill_rate=0.95, disruption_fill_rate=0.70, window=(7, 21)
+        )
+        assert res["service_level_degradation"] == pytest.approx(0.25)
+
+    def test_degradation_clamped_at_zero(self):
+        daily = self._daily([0] * 28)
+        res = compute_resilience(
+            daily, baseline_fill_rate=0.80, disruption_fill_rate=0.85, window=(7, 21)
+        )
+        assert res["service_level_degradation"] == 0.0
+
+    def test_recovery_zero_when_service_back_at_window_end(self):
+        # Full service after the window -> recovers immediately (day 0 post-window).
+        lost = [0 if t < 7 or t >= 21 else 8 for t in range(28)]
+        daily = self._daily(lost)
+        res = compute_resilience(
+            daily, baseline_fill_rate=1.0, disruption_fill_rate=0.6, window=(7, 21)
+        )
+        assert res["recovery_time"] == pytest.approx(0.0, abs=1.0)
+
+    def test_recovery_counts_days_until_back_to_baseline(self):
+        # Service stays depressed for 3 days after the window, then recovers.
+        lost = [0] * 7 + [8] * 14 + [8, 8, 8] + [0] * 4
+        daily = self._daily(lost)
+        res = compute_resilience(
+            daily, baseline_fill_rate=1.0, disruption_fill_rate=0.5, window=(7, 21)
+        )
+        assert res["recovery_time"] >= 2.0
 
     def test_no_recovery_returns_remaining_days(self):
-        # Service never recovers after the window -> recovery = remaining days.
-        records = []
-        for t in range(28):
-            records.append(_record(10, 0 if t < 7 else 8))
-        m = compute_episode_metrics(records, disruption_window=(7, 21))
-        assert m["recovery_time"] == pytest.approx(7.0, abs=1.0)  # days 21..27
+        # Never recovers after the window -> remaining days (28 - 21 = 7).
+        lost = [0] * 7 + [8] * 21
+        daily = self._daily(lost)
+        res = compute_resilience(
+            daily, baseline_fill_rate=1.0, disruption_fill_rate=0.4, window=(7, 21)
+        )
+        assert res["recovery_time"] == pytest.approx(7.0)
 
 
 class TestAggregate:
@@ -114,22 +147,18 @@ class TestAggregate:
             {
                 "total_cost": 100.0,
                 "fill_rate": 0.9,
-                "recovery_time": 0.0,
                 "holding_cost": 0.0,
                 "stockout_cost": 0.0,
                 "order_cost": 0.0,
                 "stockout_frequency": 0.0,
-                "service_level_degradation": 0.0,
             },
             {
                 "total_cost": 200.0,
                 "fill_rate": 0.8,
-                "recovery_time": 0.0,
                 "holding_cost": 0.0,
                 "stockout_cost": 0.0,
                 "order_cost": 0.0,
                 "stockout_frequency": 0.0,
-                "service_level_degradation": 0.0,
             },
         ]
         agg = aggregate_metrics(per_rep)

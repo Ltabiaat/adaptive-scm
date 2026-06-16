@@ -144,7 +144,7 @@ def test_full_run(tmp_path, monkeypatch):
     policies = {"eoq": EOQPolicy(0.05, 10.0, 3), "ppo": agent}
     for policy_name, policy in policies.items():
         env = InventoryEnv(eval_cfg, episode, seed=42)
-        result = run_replications(env, policy, n_replications=3, disruption_window=None)
+        result = run_replications(env, policy, n_replications=3)
         result.summary["forecast_rmse"] = rmse
         out_path = sim_dir / f"arima_{policy_name}_baseline.parquet"
         result_to_dataframe(result).to_parquet(out_path, index=False)
