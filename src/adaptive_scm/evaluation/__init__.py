@@ -8,6 +8,7 @@ Public surface:
 
 from adaptive_scm.evaluation.analyzer import (
     collect_summary_rows,
+    forecast_accuracy_table,
     render_summary_markdown,
     rmse_cost_correlation,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "compute_resilience",
     "mean_daily_service",
     "collect_summary_rows",
+    "forecast_accuracy_table",
     "rmse_cost_correlation",
     "render_summary_markdown",
     "per_replication_costs",

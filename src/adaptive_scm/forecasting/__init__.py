@@ -6,9 +6,15 @@ defensively: if the backing library is absent, the symbol is simply not
 exported rather than breaking ``import adaptive_scm.forecasting``.
 """
 
-from adaptive_scm.forecasting.base import ForecastOutput, Forecaster
+from adaptive_scm.forecasting.base import (
+    ForecastOutput,
+    Forecaster,
+    forecast_accuracy,
+    mape,
+    rmse,
+)
 
-__all__ = ["Forecaster", "ForecastOutput"]
+__all__ = ["Forecaster", "ForecastOutput", "rmse", "mape", "forecast_accuracy"]
 
 try:
     from adaptive_scm.forecasting.arima import ARIMAForecaster  # noqa: F401

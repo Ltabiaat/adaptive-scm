@@ -548,6 +548,18 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   For full rigor one could replace the synthetic training forecast with true
   rolling-origin forecasts (Tier 3), at much higher cost.
 
----
+### D-12.5 MAPE added as a forecast-accuracy metric 🟢
+- **What:** ``forecasting/base.py`` now provides ``mape`` (mean absolute
+  percentage error, excluding zero-demand days per Section 3.7) alongside
+  ``rmse``, plus a ``forecast_accuracy`` helper returning both.
+  ``evaluation.forecast_accuracy_table`` builds the per-forecaster RMSE/MAPE
+  table from each forecaster's test prediction vs realized test sales.
+- **Why:** Section 3.7 specifies both RMSE and MAPE for forecasting accuracy; the
+  code previously computed only RMSE. MAPE is the scale-independent complement
+  and is undefined on zero-demand days, which are excluded.
+- **Change it:** Add further accuracy metrics (e.g. WRMSSE) to
+  ``forecast_accuracy`` if the results chapter wants them.
 
-_Last updated: Tier-2 demand-model refactor. Append new entries as later features land._
+
+
+_Last updated: MAPE / forecast-accuracy metrics. Append new entries as later features land._

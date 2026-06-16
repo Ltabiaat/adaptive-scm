@@ -35,6 +35,46 @@ def rmse(predicted: np.ndarray, actual: np.ndarray) -> float:
     return float(np.sqrt(np.mean((predicted - actual) ** 2)))
 
 
+def mape(predicted: np.ndarray, actual: np.ndarray) -> float:
+    """Mean absolute percentage error, excluding zero-demand days.
+
+    Computes ``(100/n) * sum(|actual - predicted| / actual)`` over the days where
+    ``actual`` is non-zero (Section 3.7: MAPE is undefined when ``y_t = 0`` and
+    those days are excluded). Returns ``nan`` if every day has zero demand.
+
+    Args:
+        predicted: Forecast values.
+        actual: Ground-truth values, same shape as ``predicted``.
+
+    Returns:
+        MAPE as a percentage (non-negative float), or ``nan`` if undefined.
+    """
+    predicted = np.asarray(predicted, dtype=float)
+    actual = np.asarray(actual, dtype=float)
+    nonzero = actual != 0.0
+    if not nonzero.any():
+        return float("nan")
+    errors = np.abs(actual[nonzero] - predicted[nonzero]) / np.abs(actual[nonzero])
+    return float(100.0 * errors.mean())
+
+
+def forecast_accuracy(predicted: np.ndarray, actual: np.ndarray) -> dict[str, float]:
+    """Return both forecast-accuracy metrics (RMSE and MAPE) for a prediction.
+
+    Convenience wrapper used for reporting a forecaster's test-set accuracy in a
+    single call (Section 3.7 reports both). RMSE penalizes large errors and is
+    most relevant to inventory cost; MAPE is a scale-independent complement.
+
+    Args:
+        predicted: Forecast values.
+        actual: Ground-truth values, same shape as ``predicted``.
+
+    Returns:
+        Dict with ``rmse`` and ``mape``.
+    """
+    return {"rmse": rmse(predicted, actual), "mape": mape(predicted, actual)}
+
+
 @dataclass(frozen=True)
 class ForecastOutput:
     """Container for a single multi-step forecast.

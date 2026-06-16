@@ -75,6 +75,28 @@ def _pivot(summary: pd.DataFrame, value: str) -> pd.DataFrame:
     return summary.pivot_table(index=["forecaster", "policy"], columns="condition", values=value)
 
 
+def forecast_accuracy_table(predictions: dict[str, np.ndarray], actual: np.ndarray) -> pd.DataFrame:
+    """Build the forecast-accuracy table (RMSE and MAPE) per forecaster.
+
+    For each forecaster's point prediction over the test horizon, computes RMSE
+    and MAPE against the realized test sales (Section 3.7). RMSE is most relevant
+    to inventory cost; MAPE is the scale-independent complement and excludes
+    zero-demand days. Feeds the results chapter's accuracy table and the H3
+    accuracy-vs-cost discussion.
+
+    Args:
+        predictions: Mapping of forecaster name to its test-horizon point forecast.
+        actual: Realized test sales over the same horizon.
+
+    Returns:
+        A DataFrame indexed by forecaster with ``rmse`` and ``mape`` columns.
+    """
+    from adaptive_scm.forecasting import forecast_accuracy
+
+    rows = {name: forecast_accuracy(pred, actual) for name, pred in predictions.items()}
+    return pd.DataFrame.from_dict(rows, orient="index")[["rmse", "mape"]]
+
+
 def render_summary_markdown(summary: pd.DataFrame) -> str:
     """Render the suite summary as a Markdown report.
 
