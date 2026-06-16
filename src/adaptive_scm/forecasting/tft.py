@@ -74,6 +74,7 @@ class TFTForecaster(Forecaster):
         encoder_length: int = 56,
         quantiles: tuple[float, ...] = _QUANTILES,
         accelerator: str = "cpu",
+        seed: int = 42,
     ) -> None:
         """Configure model and training hyperparameters.
 
@@ -94,6 +95,8 @@ class TFTForecaster(Forecaster):
             accelerator: Lightning accelerator string. Defaults to ``"cpu"``
                 because TFT on Apple's MPS backend is unreliable (D-4.6);
                 set ``"gpu"`` or ``"auto"`` in config on CUDA machines.
+            seed: Seed applied to torch at the start of ``fit`` for reproducible
+                training (set_global_seed no longer auto-seeds torch; D-4.8).
 
         Raises:
             ValueError: If ``quantiles`` is not three ascending values in (0, 1),
@@ -123,6 +126,7 @@ class TFTForecaster(Forecaster):
         self._encoder_length = int(encoder_length)
         self._quantiles = tuple(float(q) for q in quantiles)
         self._accelerator = str(accelerator)
+        self._seed = int(seed)
 
         self._model = None  # fitted TemporalFusionTransformer
         self._frame: pd.DataFrame | None = None  # slim frame with time_idx
@@ -198,6 +202,12 @@ class TFTForecaster(Forecaster):
         from lightning.pytorch.callbacks import EarlyStopping
         from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
         from pytorch_forecasting.metrics import QuantileLoss
+
+        # Torch is now loaded; seed it for reproducibility. set_global_seed no
+        # longer imports torch (D-4.8), so the TFT path seeds it here instead.
+        from adaptive_scm.utils.seeding import seed_torch_if_loaded
+
+        seed_torch_if_loaded(self._seed)
 
         training_set = TimeSeriesDataSet(
             self._frame[self._frame["time_idx"] <= self._train_end],

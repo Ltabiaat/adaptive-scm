@@ -25,11 +25,8 @@ import pandas as pd  # noqa: E402
 from omegaconf import OmegaConf  # noqa: E402
 
 from adaptive_scm.policies import PPOAgent, PPOHyperparams  # noqa: E402
-from adaptive_scm.simulation import (
-    EnvConfig,
-    InventoryEnv,
-    make_training_episode_factory,
-)  # noqa: E402
+from adaptive_scm.forecasting import Forecaster  # noqa: E402
+from adaptive_scm.simulation import EnvConfig, InventoryEnv, make_training_episode_factory  # noqa: E402  # fmt: skip
 from adaptive_scm.utils.logging import get_logger  # noqa: E402
 from adaptive_scm.utils.seeding import set_global_seed  # noqa: E402
 
@@ -66,12 +63,19 @@ def _load_forecaster(name: str):
         )
     # Import only the requested forecaster's module (D-4.7: avoid loading both
     # XGBoost and torch into one process on macOS).
+    cls: type[Forecaster]
     if name == "arima":
-        from adaptive_scm.forecasting.arima import ARIMAForecaster as cls
+        from adaptive_scm.forecasting.arima import ARIMAForecaster
+
+        cls = ARIMAForecaster
     elif name == "xgboost":
-        from adaptive_scm.forecasting.xgboost import XGBoostForecaster as cls
+        from adaptive_scm.forecasting.xgboost import XGBoostForecaster
+
+        cls = XGBoostForecaster
     else:
-        from adaptive_scm.forecasting.tft import TFTForecaster as cls
+        from adaptive_scm.forecasting.tft import TFTForecaster
+
+        cls = TFTForecaster
     return cls.load(path)
 
 

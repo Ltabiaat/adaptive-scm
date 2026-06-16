@@ -13,14 +13,21 @@ Usage:
 
 from __future__ import annotations
 
-from pathlib import Path
+from adaptive_scm.utils.openmp import allow_duplicate_openmp
 
-import click
-import numpy as np
-import pandas as pd
-from omegaconf import OmegaConf
+# A PPO cell with an XGBoost forecaster loads both XGBoost and torch in one
+# process; permit OpenMP coexistence and cap threads on macOS before either is
+# imported (D-4.8). Harmless for non-PPO/non-XGBoost cells and off macOS.
+allow_duplicate_openmp()
 
-from adaptive_scm.simulation import (
+from pathlib import Path  # noqa: E402
+
+import click  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from omegaconf import OmegaConf  # noqa: E402
+
+from adaptive_scm.simulation import (  # noqa: E402
     DemandSpikeWrapper,
     EnvConfig,
     InventoryEnv,
@@ -29,8 +36,9 @@ from adaptive_scm.simulation import (
     result_to_dataframe,
     run_replications,
 )
-from adaptive_scm.utils.logging import get_logger
-from adaptive_scm.utils.seeding import set_global_seed
+from adaptive_scm.forecasting import Forecaster  # noqa: E402
+from adaptive_scm.utils.logging import get_logger  # noqa: E402
+from adaptive_scm.utils.seeding import set_global_seed  # noqa: E402
 
 _LOG = get_logger(__name__)
 _RESULTS_DIR = Path("results")
@@ -59,12 +67,19 @@ def load_frozen_forecaster(name: str):
         raise FileNotFoundError(f"forecaster {name!r} not found at {path}; train it first")
     # Import only the requested forecaster's module so a single-framework run
     # never loads the others' backend (avoids the macOS OpenMP clash, D-4.7).
+    cls: type[Forecaster]
     if name == "arima":
-        from adaptive_scm.forecasting.arima import ARIMAForecaster as cls
+        from adaptive_scm.forecasting.arima import ARIMAForecaster
+
+        cls = ARIMAForecaster
     elif name == "xgboost":
-        from adaptive_scm.forecasting.xgboost import XGBoostForecaster as cls
+        from adaptive_scm.forecasting.xgboost import XGBoostForecaster
+
+        cls = XGBoostForecaster
     else:
-        from adaptive_scm.forecasting.tft import TFTForecaster as cls
+        from adaptive_scm.forecasting.tft import TFTForecaster
+
+        cls = TFTForecaster
     return cls.load(path)
 
 

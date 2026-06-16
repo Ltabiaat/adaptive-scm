@@ -17,19 +17,22 @@ import sys
 
 
 def allow_duplicate_openmp() -> bool:
-    """Permit duplicate OpenMP runtimes on macOS (no-op elsewhere).
+    """Permit duplicate OpenMP runtimes on macOS and cap threads (no-op elsewhere).
 
-    Sets ``KMP_DUPLICATE_LIB_OK=TRUE`` when running on macOS and the variable is
-    not already set, so a process that loads both XGBoost and PyTorch does not
-    abort on the duplicate-runtime check. Must be called before importing either
-    backend. On non-macOS platforms it does nothing (Linux shares one OpenMP
-    runtime; CUDA hosts are unaffected).
+    Sets ``KMP_DUPLICATE_LIB_OK=TRUE`` so a process that loads both XGBoost and
+    PyTorch does not abort on the duplicate-runtime check, and sets
+    ``OMP_NUM_THREADS=1`` so the two runtimes do not oversubscribe the cores and
+    fight (which crawls rather than crashes). Neither is overwritten if already
+    set. Must be called before importing either backend. The workloads here (a
+    tiny MLP policy, single-series forecasts) gain nothing from OpenMP
+    parallelism, so the thread cap costs no real speed. Does nothing off macOS.
 
     Returns:
-        ``True`` if the flag was set by this call, ``False`` otherwise.
+        ``True`` if this call set ``KMP_DUPLICATE_LIB_OK``, ``False`` otherwise.
     """
     if sys.platform != "darwin":
         return False
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
     if os.environ.get("KMP_DUPLICATE_LIB_OK"):
         return False
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"

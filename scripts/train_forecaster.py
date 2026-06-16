@@ -84,7 +84,7 @@ def _build_xgboost(cfg) -> Forecaster:
     )
 
 
-def _build_tft(cfg) -> Forecaster:
+def _build_tft(cfg, seed: int = 42) -> Forecaster:
     """Construct a :class:`TFTForecaster` from the merged config.
 
     Reads the ``forecasters.tft`` block. ``encoder_length`` falls back to 56
@@ -110,6 +110,7 @@ def _build_tft(cfg) -> Forecaster:
         encoder_length=t.get("encoder_length", 56),
         accelerator=t.get("accelerator", "cpu"),
         quantiles=tuple(t.quantiles),
+        seed=seed,
     )
 
 
@@ -161,7 +162,7 @@ def main(model: str, config_path: Path, seed: int) -> None:
     elif model == "xgboost":
         forecaster = _build_xgboost(cfg)
     elif model == "tft":
-        forecaster = _build_tft(cfg)
+        forecaster = _build_tft(cfg, seed=seed)
     else:
         raise NotImplementedError(f"forecaster {model!r} is not implemented yet")
 

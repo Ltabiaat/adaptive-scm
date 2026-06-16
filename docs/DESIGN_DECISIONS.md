@@ -609,7 +609,42 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   (Linux/Colab unaffected). Remove it if a future XGBoost/torch ships a shared
   OpenMP on macOS.
 
-_Last updated: macOS OpenMP / lazy-import fix. Append new entries as later features land._
+### D-4.9 set_global_seed no longer imports torch (final macOS segfault fix) 🔴
+- **What:** ``set_global_seed`` now seeds torch only if it is **already** in
+  ``sys.modules`` (via new helper ``seed_torch_if_loaded``); it never imports
+  torch itself. ``TFTForecaster`` gained a ``seed`` arg and calls
+  ``seed_torch_if_loaded`` at the top of ``fit`` (after torch loads) to keep TFT
+  reproducible. PPO already seeds torch through SB3's ``seed`` param, so it is
+  unaffected. ``train_forecaster`` passes the CLI seed into ``_build_tft``.
+- **Why:** The previous ``set_global_seed`` did ``import torch`` to seed it, and
+  every training script calls it at startup. So even with lazy forecaster imports,
+  an XGBoost run loaded torch (via seeding) before XGBoost trained -> both OpenMP
+  runtimes in one process -> SIGSEGV (exit 139) on macOS. This was the residual
+  torch leak after D-4.8. Verified: the full xgboost import chain incl.
+  ``set_global_seed(42)`` now keeps ``torch`` out of ``sys.modules``.
+- **Reproducibility:** unchanged in practice. NumPy/Python seeded as before; torch
+  seeded by the component that uses it (TFT in ``fit``, PPO via SB3).
+
+### D-4.10 OpenMP guard extended to run_experiment + thread cap 🔴
+- **What:** ``run_experiment.py`` now calls ``allow_duplicate_openmp`` at the top
+  (before any import), matching ``train_ppo.py``. The guard also now sets
+  ``OMP_NUM_THREADS=1`` on macOS (in addition to ``KMP_DUPLICATE_LIB_OK=TRUE``),
+  so the dual XGBoost+torch runtime neither crashes nor oversubscribes the cores.
+  Also replaced the ``import X as cls`` branches in run_experiment/train_ppo with
+  ``cls: type[Forecaster]`` + assignment (fixes a mypy incompatible-redefinition
+  error the user's IDE flagged).
+- **Why:** The full suite evaluates each cell via ``run_experiment.py`` as a
+  subprocess. XGBoost+EOQ and XGBoost+order-up-to cells were fine (no torch), but
+  XGBoost+PPO cells load XGBoost *and* torch -> segfault, and the suite's
+  ``subprocess.run(check=True)`` then halted the whole run. The thread cap also
+  removes the contention slowdown seen during ``train_ppo --forecaster=xgboost``.
+  Surfaced by the ``--replications=2`` smoke run on the M2.
+- **Resumable:** the suite skips cells whose result file exists, so re-running
+  after the fix retries only the failed XGBoost+PPO cells.
+
+_Last updated: suite OpenMP guard + thread cap (D-4.10). Append new entries as later features land._
+
+
 
 
 
