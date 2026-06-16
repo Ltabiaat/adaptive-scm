@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 from adaptive_scm.policies.base import Policy, State
+from adaptive_scm.utils.device import resolve_device
 from adaptive_scm.utils.logging import get_logger
 
 _LOG = get_logger(__name__)
@@ -66,6 +67,7 @@ class PPOAgent(Policy):
         mean_daily_demand: float,
         hyperparams: PPOHyperparams | None = None,
         seed: int = 42,
+        device: str = "auto",
     ) -> None:
         """Configure the agent (no training yet).
 
@@ -74,6 +76,9 @@ class PPOAgent(Policy):
                 agent's unit output matches the env's action discretization.
             hyperparams: PPO hyperparameters; defaults to the PRD values.
             seed: Seed passed to PPO for reproducibility.
+            device: Compute device preference; resolved via
+                ``utils.device.resolve_device`` to ``"cuda"`` or ``"cpu"`` (never
+                MPS). ``"auto"`` uses CUDA when available, else CPU.
 
         Raises:
             ValueError: If ``mean_daily_demand`` is non-positive.
@@ -83,6 +88,7 @@ class PPOAgent(Policy):
         self._d_bar = float(mean_daily_demand)
         self._hp = hyperparams or PPOHyperparams()
         self._seed = int(seed)
+        self._device = resolve_device(device)
         self._model = None  # set by train() or load()
 
     def train(self, env, total_timesteps: int, normalize_reward: bool = False):
@@ -123,6 +129,7 @@ class PPOAgent(Policy):
             n_steps=self._hp.n_steps,
             policy_kwargs=dict(net_arch=list(self._hp.net_arch), activation_fn=nn.Tanh),
             seed=self._seed,
+            device=self._device,
             verbose=0,
         )
         self._model.learn(total_timesteps=total_timesteps)
@@ -131,6 +138,7 @@ class PPOAgent(Policy):
             total_timesteps=total_timesteps,
             n_steps=self._hp.n_steps,
             normalize_reward=normalize_reward,
+            device=self._device,
         )
         return self
 
@@ -219,8 +227,8 @@ class PPOAgent(Policy):
         from stable_baselines3 import PPO
 
         instance = cls(mean_daily_demand=mean_daily_demand)
-        instance._model = PPO.load(str(path))
-        _LOG.info("ppo_loaded", path=str(path))
+        instance._model = PPO.load(str(path), device=instance._device)
+        _LOG.info("ppo_loaded", path=str(path), device=instance._device)
         return instance
 
     def _require_trained(self) -> None:

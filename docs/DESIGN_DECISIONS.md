@@ -562,4 +562,19 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 
 
 
-_Last updated: MAPE / forecast-accuracy metrics. Append new entries as later features land._
+### D-9.8 Device resolution is cuda-or-cpu, never MPS 🟢
+- **What:** ``utils/device.py::resolve_device`` returns ``"cuda"`` when a CUDA GPU
+  is available and ``"cpu"`` otherwise; an explicit ``"mps"`` is downgraded to
+  ``"cpu"``. ``PPOAgent`` takes a ``device`` arg (default ``"auto"``), resolves it,
+  and passes it to SB3 ``PPO(...)`` and ``PPO.load(...)``; the resolved device is
+  logged. TFT already defaults ``accelerator="cpu"``.
+- **Why:** On Apple Silicon (e.g. an M2), Torch's MPS backend gives no speed-up for
+  the small MLP policy and has unsupported-operation gaps that crash
+  pytorch-forecasting's TFT. Forcing cuda-or-cpu keeps a Mac on CPU (reliable) and
+  a CUDA host (e.g. Colab) on GPU (fast) through one code path. SB3's own
+  ``get_device`` already ignores MPS; this makes the choice explicit and uniform.
+- **Change it:** Pass ``device="cuda"`` explicitly to force GPU, or set MPS support
+  here if a future Torch/pytorch-forecasting fixes the TFT gaps.
+
+_Last updated: device resolution (M2 readiness). Append new entries as later features land._
+
