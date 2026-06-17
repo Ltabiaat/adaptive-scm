@@ -181,9 +181,10 @@ def main(forecaster: str, config_path: Path, timesteps: int | None, seed: int) -
         net_arch=tuple(p.policy_net),
     )
     total = timesteps if timesteps is not None else p.total_timesteps
+    normalize_reward = bool(p.get("normalize_reward", True))
 
     agent = PPOAgent(mean_daily_demand=d_bar, hyperparams=hp, seed=seed)
-    agent.train(env, total_timesteps=total)
+    agent.train(env, total_timesteps=total, normalize_reward=normalize_reward)
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = _RESULTS_DIR / f"ppo_{forecaster}.zip"

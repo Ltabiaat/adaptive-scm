@@ -642,7 +642,23 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
 - **Resumable:** the suite skips cells whose result file exists, so re-running
   after the fix retries only the failed XGBoost+PPO cells.
 
-_Last updated: suite OpenMP guard + thread cap (D-4.10). Append new entries as later features land._
+### D-9.9 PPO trained with reward normalization (VecNormalize) 🔴
+- **What:** ``config.policies.ppo.normalize_reward`` added, default ``true``;
+  ``train_ppo`` reads it and passes to ``PPOAgent.train``, which wraps the env in
+  ``VecNormalize(norm_obs=False, norm_reward=True)``. Reward-only: observations
+  stay raw, so the saved policy evaluates directly on the raw env (no
+  VecNormalize round-trip at eval).
+- **Why:** With ``normalize_reward=False`` the smoke run showed PPO under-ordering
+  -- fill rates 0.44-0.60 vs 0.79-0.90 for EOQ/order-up-to, despite a 40:1
+  stockout:holding ratio that should drive high service. Symptom of the trivial
+  "avoid order cost" local optimum from un-normalized large negative rewards --
+  exactly the PRD §8 reward-scaling concern. Normalization is the prescribed fix.
+- **Verify:** retrain 3 agents, re-run the 2-rep smoke; expect PPO fill rates to
+  rise toward the classical policies. If they don't, PPO genuinely finds a leaner
+  tradeoff and H1's rejection stands -- now with the convergence confound ruled out.
+
+_Last updated: PPO reward normalization (D-9.9). Append new entries as later features land._
+
 
 
 

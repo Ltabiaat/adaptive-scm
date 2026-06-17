@@ -82,3 +82,4 @@ policies:
     n_steps: 2048
     policy_net: [64, 64]
     activation: tanh
+    normalize_reward: true   # VecNormalize reward scaling; stabilizes convergence (PRD §8)
