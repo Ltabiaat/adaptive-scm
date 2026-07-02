@@ -5,7 +5,7 @@ data:
   raw_dir: data/raw
   processed_dir: data/processed
   product_store:
-    item_id: FOODS_3_694
+    item_id: FOODS_3_090
     store_id: CA_1
   splits:
     # 1941 M5 days - 365 (longest-lag feature warmup, dropped) = 1576 usable;

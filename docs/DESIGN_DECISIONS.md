@@ -657,7 +657,31 @@ Status legend: 🟢 low-risk / cosmetic · 🟡 worth a look · 🔴 affects res
   rise toward the classical policies. If they don't, PPO genuinely finds a leaner
   tradeoff and H1's rejection stands -- now with the convergence confound ruled out.
 
-_Last updated: PPO reward normalization (D-9.9). Append new entries as later features land._
+### D-12.6 Test-set forecast-accuracy report (RMSE + MAPE) 🟢
+- **What:** New ``scripts/report_forecast_accuracy.py`` loads each trained
+  forecaster, forecasts the held-out test window, scores it against realized
+  test-split sales via ``forecast_accuracy``, and writes
+  ``results/analysis/forecast_accuracy.md`` (RMSE + MAPE per forecaster). Skips
+  forecasters not yet trained rather than crashing.
+- **Why:** Section 3.7 reports both RMSE and MAPE, but the suite only emitted
+  ``forecast_rmse`` (the *validation* RMSE used for noise calibration) and no
+  MAPE. This produces the missing metric and reports *test-set* numbers for both,
+  the conventional accuracy table for Chapter 4. Uses the lazy-load + OpenMP guard
+  pattern so it is macOS-safe.
+
+### D-10.4 Recovery-trajectory diagnostic 🟢
+- **What:** ``scripts/diagnose_recovery.py`` reads the saved per-(replication,day)
+  rows for a disruption cell and its baseline, averages daily fill rate, prints a
+  day-by-day table with the disruption window flagged, reports the first
+  post-window day back within 1 point of baseline, and saves a PNG.
+- **Why:** Lead-time-disruption recovery time is uniformly 0 across all 9 cells.
+  This confirms the mechanism rather than asserting it: service dips *during* the
+  window then rebounds immediately when normal lead times resume (no depletion
+  tail), unlike a demand spike. Read-only; no effect on results.
+
+_Last updated: recovery diagnostic (D-10.4). Append new entries as later features land._
+
+
 
 
 
